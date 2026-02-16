@@ -20,4 +20,4 @@ ffmpeg -i "$RTSP_URL" \
   -c:v libx264 -preset ultrafast -tune zerolatency \
   -b:v 600k -s 854x480 \
   -an \
-  -f rtsp rtsp://127.0.0.1:8554/cam_${CAMERA_ID}
+  -f rtsp rtsp://127.0.0.1:8555/cam_${CAMERA_ID}

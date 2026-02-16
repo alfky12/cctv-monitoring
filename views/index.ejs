@@ -350,13 +350,15 @@
                         const response = await fetch('/api/status');
                         const data = await response.json();
 
-                        const currentCamIds = Array.from(document.querySelectorAll('[id^="status-dot-"]')).map(el => el.id.replace('status-dot-', ''));
                         const apiCamIds = Object.keys(data.cameras);
 
-                        // If new camera detected (count increases or ID not found), show refresh toast
-                        if (apiCamIds.some(id => !currentCamIds.includes(id)) && currentCamIds.length > 0) {
-                            if (!document.getElementById('refresh-toast')) {
-                                showRefreshToast('Kamera baru terdeteksi! Klik untuk refresh.');
+                        if (!window.initialApiCamIds) {
+                            window.initialApiCamIds = apiCamIds;
+                        } else {
+                            if (apiCamIds.some(id => !window.initialApiCamIds.includes(id))) {
+                                if (!document.getElementById('refresh-toast')) {
+                                    showRefreshToast('Kamera baru terdeteksi! Klik untuk refresh.');
+                                }
                             }
                         }
 
@@ -364,7 +366,6 @@
                             const status = data.cameras[id];
                             const dot = document.getElementById(`status-dot-${id}`);
                             const text = document.getElementById(`status-text-${id}`);
-
 
                             if (dot && text) {
                                 if (status.online) {
@@ -503,7 +504,15 @@
                         </svg>
                         ${message}
                     `;
-                    toast.onclick = () => window.location.reload();
+                    const hideTimeout = setTimeout(() => {
+                        if (toast.parentNode) {
+                            toast.parentNode.removeChild(toast);
+                        }
+                    }, 10000);
+                    toast.onclick = () => {
+                        clearTimeout(hideTimeout);
+                        window.location.reload();
+                    };
                     document.body.appendChild(toast);
                 }
 

@@ -50,25 +50,44 @@ FULL_PATH=$(pwd)
 
 cat << 'EOF' > smart_transcode.sh
 #!/bin/bash
-# CCTV Smart Transcoder for ARM/Ubuntu
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 LOG_FILE="$SCRIPT_DIR/smart_transcode.log"
+echo "[$(date)] --- Processing: $MTX_PATH ---" >> "$LOG_FILE"
+
 if [[ "$MTX_PATH" != *"_input"* ]]; then exit 0; fi
 
 SOURCE_RTSP="rtsp://127.0.0.1:8555/$MTX_PATH"
 TARGET_NAME="${MTX_PATH/_input/}"
 TARGET_RTSP="rtsp://127.0.0.1:8555/$TARGET_NAME"
 
-sleep 3
-VIDEO_CODEC=$(ffprobe -v error -rtsp_transport tcp -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 -timeout 3000000 "$SOURCE_RTSP")
+# Global tunable parameters to keep CPU usage low when many H.265 cameras are present
+VIDEO_BITRATE="800k"
+MAX_VIDEO_BITRATE="900k"
+VIDEO_BUF_SIZE="1600k"
+VIDEO_FPS=12
+GOP_SIZE=$((VIDEO_FPS * 2))
+ENC_THREADS=1
 
-echo "[$(date)] Task: $MTX_PATH | Codec: $VIDEO_CODEC" >> "$LOG_FILE"
+sleep 2
 
-if [ "$VIDEO_CODEC" == "h264" ]; then
-    ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i "$SOURCE_RTSP" -c copy -map 0:v:0 -an -f rtsp -rtsp_transport tcp "$TARGET_RTSP" >> "$LOG_FILE" 2>&1
-else
-    ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i "$SOURCE_RTSP" -c:v libx264 -preset ultrafast -tune zerolatency -b:v 1000k -maxrate 1000k -bufsize 2000k -threads 2 -s 1280x720 -pix_fmt yuv420p -map 0:v:0 -an -f rtsp -rtsp_transport tcp "$TARGET_RTSP" >> "$LOG_FILE" 2>&1
+VIDEO_CODEC=$(
+  ffprobe -v error -rtsp_transport tcp -select_streams v:0 \
+    -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 \
+    "$SOURCE_RTSP" 2>/dev/null | head -n1 | tr -d '\r\n'
+)
+echo "[$(date)] Detected codec: '$VIDEO_CODEC'" >> "$LOG_FILE"
+
+if [[ "$VIDEO_CODEC" == "h264" || "$VIDEO_CODEC" == "mpeg4" || -z "$VIDEO_CODEC" ]]; then
+  echo "[$(date)] Skipping transcode for $MTX_PATH (codec: '$VIDEO_CODEC')" >> "$LOG_FILE"
+  exit 0
 fi
+
+echo "[$(date)] Transcoding $MTX_PATH to H.264/yuv420p with ${VIDEO_BITRATE}@${VIDEO_FPS}fps" >> "$LOG_FILE"
+ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i "$SOURCE_RTSP" \
+  -c:v libx264 -preset ultrafast -tune zerolatency -profile:v main -level 4.0 \
+  -pix_fmt yuv420p -b:v \"$VIDEO_BITRATE\" -maxrate \"$MAX_VIDEO_BITRATE\" -bufsize \"$VIDEO_BUF_SIZE\" \
+  -r \"$VIDEO_FPS\" -g \"$GOP_SIZE\" -threads \"$ENC_THREADS\" \
+  -an -f rtsp -rtsp_transport tcp \"$TARGET_RTSP\" >> \"$LOG_FILE\" 2>&1
 EOF
 
 cat << 'EOF' > record_notify.sh
@@ -166,4 +185,3 @@ echo "   - HLS Port: 8856 (fMP4 with H265 support)"
 echo "   - RTSP Port: 8555"
 echo "   - Recording: 7 days retention"
 echo ""
-

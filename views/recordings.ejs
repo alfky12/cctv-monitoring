@@ -244,6 +244,7 @@
                             <thead>
                                 <tr class="bg-gray-900 text-gray-400 text-sm uppercase tracking-wider">
                                     <th class="p-4 font-semibold border-b border-gray-700 w-1/4">Kamera</th>
+                                    <th class="p-4 font-semibold border-b border-gray-700">Preview</th>
                                     <th class="p-4 font-semibold border-b border-gray-700">Waktu Rekam</th>
                                     <th class="p-4 font-semibold border-b border-gray-700">Durasi</th>
                                     <th class="p-4 font-semibold border-b border-gray-700">Ukuran</th>
@@ -257,6 +258,13 @@
                                         data-file="/<%= rec.file_path %>">
                                         <td class="p-4 font-medium text-white">
                                             <%= rec.camera_name %>
+                                        </td>
+                                        <td class="p-4">
+                                            <video class="w-24 h-16 rounded object-cover bg-black" muted playsinline
+                                                preload="metadata" src="/<%= rec.file_path %>"
+                                                onmouseover="this.play()"
+                                                onmouseout="this.pause(); this.currentTime = 0;">
+                                            </video>
                                         </td>
                                         <td class="p-4 text-gray-300">
                                             <%= new Date(rec.created_at).toLocaleString('id-ID') %>
@@ -323,24 +331,37 @@
                     <h3 class="text-white font-bold" id="videoTitle">Pemutar Video Rekaman</h3>
                     <p class="text-sm text-gray-400" id="videoInfo"></p>
                 </div>
-                <div class="flex items-center gap-2">
-                    <button onclick="toggleModalFullscreen()"
-                        class="min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-400 hover:text-white p-2 rounded touch-manipulation"
-                        title="Fullscreen">
-                        <svg id="modal-fullscreen-icon" class="w-6 h-6" fill="none" stroke="currentColor"
-                            viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 8V4m0 0h4m-4 0l5 5m5-5l-5 5M4 16v4m0 0h4m-4 0l5-5m-5 5l5-5m-5 5v-4m0 4h-4"></path>
-                        </svg>
-                    </button>
-                    <button onclick="closeModal()"
-                        class="min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-400 hover:text-white p-2 rounded touch-manipulation">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M6 18L18 6M6 6l12 12">
-                            </path>
-                        </svg>
-                    </button>
+                <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-1 text-xs text-gray-300">
+                        <span>Speed</span>
+                        <select id="playbackRateSelect"
+                            class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100"
+                            onchange="changePlaybackRate(this.value)">
+                            <option value="0.5">0.5x</option>
+                            <option value="1" selected>1x</option>
+                            <option value="1.5">1.5x</option>
+                            <option value="2">2x</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="toggleModalFullscreen()"
+                            class="min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-400 hover:text-white p-2 rounded touch-manipulation"
+                            title="Fullscreen">
+                            <svg id="modal-fullscreen-icon" class="w-6 h-6" fill="none" stroke="currentColor"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 8V4m0 0h4m-4 0l5 5m5-5l-5 5M4 16v4m0 0h4m-4 0l5-5m-5 5l5-5m-5 5v-4m0 4h-4"></path>
+                            </svg>
+                        </button>
+                        <button onclick="closeModal()"
+                            class="min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-400 hover:text-white p-2 rounded touch-manipulation">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M6 18L18 6M6 6l12 12">
+                                </path>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <div class="aspect-video bg-black flex items-center justify-center relative">
                     <video id="modal-player" class="w-full h-full" controls autoplay>
@@ -569,6 +590,13 @@
                 document.getElementById('noRecordings').style.display = visibleCount === 0 ? 'block' : 'none';
             }
 
+            function changePlaybackRate(rate) {
+                const value = parseFloat(rate);
+                if (player && !isNaN(value) && value > 0) {
+                    player.playbackRate = value;
+                }
+            }
+
             // Play video with timeline
             function playVideo(url, cameraName, createdAt) {
                 currentRecording = { url, cameraName, createdAt };
@@ -579,6 +607,12 @@
 
                 player.src = url;
                 modal.style.display = 'flex';
+
+                const rateSelect = document.getElementById('playbackRateSelect');
+                if (rateSelect) {
+                    rateSelect.value = '1';
+                }
+                player.playbackRate = 1;
 
                 document.getElementById('videoTitle').textContent = cameraName || 'Video Recording';
                 document.getElementById('videoInfo').textContent = createdAt ? new Date(createdAt).toLocaleString('id-ID') : '';
