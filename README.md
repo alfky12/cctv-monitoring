@@ -7,7 +7,7 @@ A powerful, lightweight, and modern web application for real-time CCTV monitorin
 [![MediaMTX](https://img.shields.io/badge/Streaming-MediaMTX-orange?style=for-the-badge&logo=ffmpeg)](https://github.com/bluenviron/mediamtx)
 
 ---
-
+https://cctv.alijaya.com
 ## ✨ Fitur Unggulan
 
 *   🖥️ **Modern Dashboard**: Tampilan grid yang responsif dan elegan untuk melihat semua kamera sekaligus.
@@ -112,3 +112,4 @@ Distributed under the **MIT License**. Lihat `LICENSE` untuk informasi lebih lan
 
 ---
 Built with ❤️ by **ALIJAYA-NET** 🇮🇩
+
