@@ -291,6 +291,9 @@
                                 var transcodedSrc = baseUrl + '/cam_<%= camera.id %>/index.m3u8';
                                 var fallbackSrc = baseUrl + '/cam_<%= camera.id %>_input/index.m3u8';
                                 var usedFallback = false;
+                                var connectTimeout = null;
+                                var retryCount = 0;
+                                var maxRetries = 3;
 
                                 function setOverlay(visible, message) {
                                     if (!overlay) return;
@@ -308,6 +311,14 @@
 
                                 function initHls(src) {
                                     setOverlay(true, 'Menghubungkan ke stream...');
+                                    if (connectTimeout) {
+                                        clearTimeout(connectTimeout);
+                                    }
+                                    connectTimeout = setTimeout(function () {
+                                        if (video && video.readyState < 2) {
+                                            setOverlay(true, 'Gagal memuat stream. Silakan cek koneksi atau ulangi.');
+                                        }
+                                    }, 15000);
                                     if (Hls.isSupported()) {
                                         var hls = new Hls({
                                             debug: false,
@@ -321,6 +332,16 @@
                                         hls.on(Hls.Events.MANIFEST_PARSED, function () {
                                             video.play().catch(function (e) { console.log('Autoplay blocked', e); });
                                         });
+                                        if (!video._overlayPlayingBound) {
+                                            video.addEventListener('playing', function () {
+                                                if (connectTimeout) {
+                                                    clearTimeout(connectTimeout);
+                                                    connectTimeout = null;
+                                                }
+                                                setOverlay(false);
+                                            });
+                                            video._overlayPlayingBound = true;
+                                        }
                                         hls.on(Hls.Events.ERROR, function (event, data) {
                                             if (data.fatal) {
                                                 switch (data.type) {
@@ -329,12 +350,22 @@
                                                         if (!usedFallback && src === transcodedSrc) {
                                                             console.log('Transcoded stream not available for cam_<%= camera.id %>, trying raw input...');
                                                             usedFallback = true;
+                                                            retryCount = 0;
                                                             hls.destroy();
                                                             initHls(fallbackSrc);
                                                         } else {
-                                                            // Already on fallback or fallback stream, retry
-                                                            setOverlay(true, 'Gagal memuat stream, mencoba ulang...');
-                                                            setTimeout(function () { hls.startLoad(); }, 3000);
+                                                            if (retryCount < maxRetries) {
+                                                                retryCount++;
+                                                                setOverlay(true, 'Gagal memuat stream, mencoba ulang (' + retryCount + '/' + maxRetries + ')...');
+                                                                setTimeout(function () { hls.startLoad(); }, 3000);
+                                                            } else {
+                                                                if (connectTimeout) {
+                                                                    clearTimeout(connectTimeout);
+                                                                    connectTimeout = null;
+                                                                }
+                                                                setOverlay(true, 'Gagal memuat stream. Silakan cek koneksi atau reload halaman.');
+                                                                hls.destroy();
+                                                            }
                                                         }
                                                         break;
                                                     case Hls.ErrorTypes.MEDIA_ERROR:
@@ -347,6 +378,11 @@
                                             }
                                         });
                                     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                                        if (connectTimeout) {
+                                            clearTimeout(connectTimeout);
+                                            connectTimeout = null;
+                                        }
+                                        setOverlay(true, 'Menghubungkan ke stream...');
                                         video.src = fallbackSrc;
                                         video.addEventListener('loadedmetadata', function () {
                                             setOverlay(false);

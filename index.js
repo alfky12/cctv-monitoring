@@ -9,7 +9,7 @@ const config = require('./config.json');
 const webPush = require('web-push');
 
 const app = express();
-const PORT = config.server.port || 3000;
+const PORT = config.server.port || 3003;
 
 // Di belakang Cloudflare/reverse proxy HTTPS: Express harus percaya header X-Forwarded-*
 // agar req.secure dan req.protocol benar, dan cookie session bisa dipakai di HTTPS.
@@ -309,7 +309,8 @@ async function setupMediaMtxGlobalConfig() {
     await mediaMtxRequest('PATCH', '/defaults/update', {
         runOnReady: transcodeScript,
         runOnReadyRestart: true,
-        runOnRecordSegmentComplete: notifyScript
+        runOnRecordSegmentComplete: notifyScript,
+        rtspTransport: 'tcp'
     });
 }
 
