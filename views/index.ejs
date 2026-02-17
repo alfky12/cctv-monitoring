@@ -10,7 +10,7 @@
     <title>
         <%= site.title %>
     </title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/css/tailwind.css">
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
@@ -270,10 +270,11 @@
                                             d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
                                     </svg>
                                 </button>
-                                <div
-                                    class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 hover:opacity-100 transition duration-300">
-                                    <div class="bg-black bg-opacity-50 p-2 rounded text-white text-sm">Waiting for
-                                        stream...
+                                <div id="cam-overlay-<%= camera.id %>"
+                                    class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-100 transition duration-300">
+                                    <div
+                                        class="bg-black bg-opacity-50 px-3 py-1.5 rounded text-white text-xs md:text-sm text-center">
+                                        <span id="cam-overlay-text-<%= camera.id %>">Menghubungkan ke stream...</span>
                                     </div>
                                 </div>
                             </div>
@@ -281,6 +282,8 @@
                         <script>
                             (function () {
                                 var video = document.getElementById('video-<%= camera.id %>');
+                                var overlay = document.getElementById('cam-overlay-<%= camera.id %>');
+                                var overlayText = document.getElementById('cam-overlay-text-<%= camera.id %>');
                                 // Priority: public_hls_url > dynamic local URL
                                 var baseUrl = '<%= mediamtx.public_hls_url %>' || (window.location.protocol + '//' + window.location.hostname + ':<%= hls_port %>');
 
@@ -289,7 +292,22 @@
                                 var fallbackSrc = baseUrl + '/cam_<%= camera.id %>_input/index.m3u8';
                                 var usedFallback = false;
 
+                                function setOverlay(visible, message) {
+                                    if (!overlay) return;
+                                    if (message && overlayText) {
+                                        overlayText.innerText = message;
+                                    }
+                                    if (visible) {
+                                        overlay.classList.remove('opacity-0');
+                                        overlay.classList.add('opacity-100');
+                                    } else {
+                                        overlay.classList.remove('opacity-100');
+                                        overlay.classList.add('opacity-0');
+                                    }
+                                }
+
                                 function initHls(src) {
+                                    setOverlay(true, 'Menghubungkan ke stream...');
                                     if (Hls.isSupported()) {
                                         var hls = new Hls({
                                             debug: false,
@@ -315,6 +333,7 @@
                                                             initHls(fallbackSrc);
                                                         } else {
                                                             // Already on fallback or fallback stream, retry
+                                                            setOverlay(true, 'Gagal memuat stream, mencoba ulang...');
                                                             setTimeout(function () { hls.startLoad(); }, 3000);
                                                         }
                                                         break;
@@ -328,9 +347,9 @@
                                             }
                                         });
                                     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                                        // Safari native HLS - supports H.265 natively via fMP4
                                         video.src = fallbackSrc;
                                         video.addEventListener('loadedmetadata', function () {
+                                            setOverlay(false);
                                             video.play();
                                         });
                                     }

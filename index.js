@@ -34,9 +34,11 @@ app.locals.telegram = config.telegram;
 app.locals.mediamtx = config.mediamtx;
 app.locals.hls_port = config.mediamtx?.hls_port || 8856;
 
-// Monitoring State
-let cameraStatus = {}; // { id: { online: true, lastUpdate: Date } }
+let cameraStatus = {};
 let diskUsage = { total: 0, used: 0, percent: 0 };
+let diskCriticalAlerted = false;
+let mediaMtxErrorNotified = false;
+let loginAttempts = {};
 
 // RTSP URL Templates for various camera brands
 const RTSP_TEMPLATES = {
@@ -382,14 +384,20 @@ async function updateSystemHealth() {
                 };
 
                 if (diskUsage.percent > 90) {
-                    sendTelegramMessage(`⚠️ <b>CRITICAL STORAGE</b>\nDisk usage is at <b>${diskUsage.percent}%</b> (${diskUsage.used}/${diskUsage.total}). Segment cleanup might be needed.`);
+                    if (!diskCriticalAlerted) {
+                        sendTelegramMessage(`⚠️ <b>CRITICAL STORAGE</b>\nDisk usage is at <b>${diskUsage.percent}%</b> (${diskUsage.used}/${diskUsage.total}). Segment cleanup might be needed.`);
 
-                    // Send push notification for critical storage
-                    sendPushNotification(
-                        '⚠️ Critical Storage Alert',
-                        `Disk usage is at ${diskUsage.percent}%. Cleanup needed!`,
-                        '/admin/recordings'
-                    );
+                        // Send push notification for critical storage
+                        sendPushNotification(
+                            '⚠️ Critical Storage Alert',
+                            `Disk usage is at ${diskUsage.percent}%. Cleanup needed!`,
+                            '/admin/recordings'
+                        );
+
+                        diskCriticalAlerted = true;
+                    }
+                } else {
+                    diskCriticalAlerted = false;
                 }
             }
         });
@@ -408,14 +416,20 @@ async function updateSystemHealth() {
                 };
 
                 if (diskUsage.percent > 90) {
-                    sendTelegramMessage(`⚠️ <b>CRITICAL STORAGE</b>\nDisk usage is at <b>${diskUsage.percent}%</b> (${diskUsage.used}/${diskUsage.total}). Segment cleanup might be needed.`);
+                    if (!diskCriticalAlerted) {
+                        sendTelegramMessage(`⚠️ <b>CRITICAL STORAGE</b>\nDisk usage is at <b>${diskUsage.percent}%</b> (${diskUsage.used}/${diskUsage.total}). Segment cleanup might be needed.`);
 
-                    // Send push notification for critical storage
-                    sendPushNotification(
-                        '⚠️ Critical Storage Alert',
-                        `Disk usage is at ${diskUsage.percent}%. Cleanup needed!`,
-                        '/admin/recordings'
-                    );
+                        // Send push notification for critical storage
+                        sendPushNotification(
+                            '⚠️ Critical Storage Alert',
+                            `Disk usage is at ${diskUsage.percent}%. Cleanup needed!`,
+                            '/admin/recordings'
+                        );
+
+                        diskCriticalAlerted = true;
+                    }
+                } else {
+                    diskCriticalAlerted = false;
                 }
             }
         });
@@ -425,6 +439,7 @@ async function updateSystemHealth() {
     try {
         // Use /v3/paths/list for real-time status (not just config)
         const pathsData = await mediaMtxRequest('GET', '/v3/paths/list');
+        mediaMtxErrorNotified = false;
         const itemsList = pathsData.items || [];
 
         // Convert list to map for easier lookup if it's an array
@@ -437,6 +452,8 @@ async function updateSystemHealth() {
 
         db.all("SELECT id, nama, lokasi FROM cameras", [], (err, rows) => {
             if (err) return;
+
+            const now = new Date();
 
             rows.forEach(cam => {
                 const inputPath = `cam_${cam.id}_input`;
@@ -465,15 +482,41 @@ async function updateSystemHealth() {
                     );
                 }
 
+                let offlineSince = prevState.offlineSince || null;
+                let offlineAlertSent = prevState.offlineAlertSent || false;
+
+                if (!currentlyOnline) {
+                    if (prevState.online) {
+                        offlineSince = now;
+                        offlineAlertSent = false;
+                    } else if (!offlineSince) {
+                        offlineSince = now;
+                    }
+
+                    const thresholdMs = 5 * 60 * 1000;
+                    if (!offlineAlertSent && offlineSince && (now - offlineSince) >= thresholdMs) {
+                        sendTelegramMessage(`⚠️ <b>Camera OFFLINE > 5 menit</b>\nNama: ${cam.nama}\nLokasi: ${cam.lokasi}`);
+                        offlineAlertSent = true;
+                    }
+                } else {
+                    offlineSince = null;
+                    offlineAlertSent = false;
+                }
+
                 cameraStatus[cam.id] = {
                     online: currentlyOnline,
-                    lastUpdate: new Date(),
-                    hasBeenChecked: true
+                    lastUpdate: now,
+                    hasBeenChecked: true,
+                    offlineSince,
+                    offlineAlertSent
                 };
             });
         });
     } catch (e) {
-        // Silent fail
+        if (!mediaMtxErrorNotified) {
+            sendTelegramMessage('❌ <b>MediaMTX tidak merespon</b>\nCek service <b>mediamtx</b> di server.');
+            mediaMtxErrorNotified = true;
+        }
     }
 }
 
@@ -573,9 +616,36 @@ app.post('/login', (req, res) => {
     if (username === ADMIN_USER && password === ADMIN_PASS) {
         req.session.user = username;
         console.log(`[Login] Success - Session ID: ${req.sessionID}`);
+        const ip = req.ip || req.connection.remoteAddress || 'unknown';
+        if (loginAttempts[ip]) {
+            delete loginAttempts[ip];
+        }
         res.redirect('/admin');
     } else {
         console.log(`[Login] Failed - Invalid credentials`);
+
+        const ip = req.ip || req.connection.remoteAddress || 'unknown';
+        const now = Date.now();
+        const windowMs = 5 * 60 * 1000;
+        const threshold = 5;
+
+        if (!loginAttempts[ip]) {
+            loginAttempts[ip] = { count: 1, firstAttempt: now, alerted: false };
+        } else {
+            const entry = loginAttempts[ip];
+            if (now - entry.firstAttempt > windowMs) {
+                loginAttempts[ip] = { count: 1, firstAttempt: now, alerted: false };
+            } else {
+                entry.count += 1;
+            }
+        }
+
+        const entry = loginAttempts[ip];
+        if (!entry.alerted && entry.count >= threshold) {
+            sendTelegramMessage(`⚠️ <b>Banyak login admin gagal</b>\nIP: ${ip}\nPercobaan gagal: ${entry.count} dalam 5 menit`);
+            entry.alerted = true;
+        }
+
         res.render('login', { error: 'Username atau Password salah!' });
     }
 });
@@ -644,20 +714,26 @@ app.post('/api/cameras', requireApiAuth, (req, res) => {
             }
             const newCam = { id: this.lastID, nama, lokasi, url_rtsp, lat, lng };
             await registerCamera(newCam);
+            sendTelegramMessage(`📷 <b>Kamera baru ditambahkan</b>\nNama: ${nama}\nLokasi: ${lokasi || '-'}`);
             res.json({ message: "success", data: newCam });
         });
 });
 
 app.delete('/api/cameras/:id', requireApiAuth, (req, res) => {
-    db.run(`DELETE FROM cameras WHERE id = ?`, req.params.id, async function (err) {
-        if (err) {
-            res.status(400).json({ error: err.message });
-            return;
-        }
-        // Remove from MediaMTX
-        await mediaMtxRequest('DELETE', '/delete/' + `cam_${req.params.id}_input`);
-        await mediaMtxRequest('DELETE', '/delete/' + `cam_${req.params.id}`);
-        res.json({ message: "deleted" });
+    const id = req.params.id;
+    db.get(`SELECT nama, lokasi FROM cameras WHERE id = ?`, [id], (selectErr, cam) => {
+        db.run(`DELETE FROM cameras WHERE id = ?`, id, async function (err) {
+            if (err) {
+                res.status(400).json({ error: err.message });
+                return;
+            }
+            await mediaMtxRequest('DELETE', '/delete/' + `cam_${id}_input`);
+            await mediaMtxRequest('DELETE', '/delete/' + `cam_${id}`);
+            if (cam) {
+                sendTelegramMessage(`🗑️ <b>Kamera dihapus</b>\nNama: ${cam.nama}\nLokasi: ${cam.lokasi || '-'}`);
+            }
+            res.json({ message: "deleted" });
+        });
     });
 });
 
@@ -674,20 +750,28 @@ app.put('/api/cameras/:id', requireApiAuth, (req, res) => {
         return res.status(400).json({ error: 'Camera name is required' });
     }
 
-    db.run(`UPDATE cameras SET nama = ?, lokasi = ?, url_rtsp = ?, lat = ?, lng = ? WHERE id = ?`,
-        [nama.trim(), lokasi?.trim() || '', url_rtsp.trim(), lat || null, lng || null, id],
-        async function (err) {
-            if (err) {
-                res.status(400).json({ error: err.message });
-                return;
-            }
-            // Update MediaMTX
-            await registerCamera({ id, nama, lokasi, url_rtsp });
-            res.json({
-                message: "success",
-                data: { id, nama, lokasi, url_rtsp, lat, lng }
+    db.get(`SELECT url_rtsp FROM cameras WHERE id = ?`, [id], (selectErr, existing) => {
+        db.run(`UPDATE cameras SET nama = ?, lokasi = ?, url_rtsp = ?, lat = ?, lng = ? WHERE id = ?`,
+            [nama.trim(), lokasi?.trim() || '', url_rtsp.trim(), lat || null, lng || null, id],
+            async function (err) {
+                if (err) {
+                    res.status(400).json({ error: err.message });
+                    return;
+                }
+                await registerCamera({ id, nama, lokasi, url_rtsp });
+
+                if (existing && existing.url_rtsp !== url_rtsp.trim()) {
+                    sendTelegramMessage(`🔁 <b>RTSP URL kamera diubah</b>\nNama: ${nama}\nLokasi: ${lokasi || '-'}\nURL lama: ${existing.url_rtsp}\nURL baru: ${url_rtsp.trim()}`);
+                } else {
+                    sendTelegramMessage(`🛠️ <b>Kamera diperbarui</b>\nNama: ${nama}\nLokasi: ${lokasi || '-'}`);
+                }
+
+                res.json({
+                    message: "success",
+                    data: { id, nama, lokasi, url_rtsp, lat, lng }
+                });
             });
-        });
+    });
 });
 
 // Update Settings
@@ -1333,6 +1417,7 @@ app.post('/api/system/update', requireApiAuth, (req, res) => {
     exec('git pull', (err, stdout, stderr) => {
         if (err) {
             console.error('[Update] Git pull failed:', err);
+            sendTelegramMessage(`❌ <b>Update aplikasi gagal</b>\nLangkah: git pull\nError: ${err.message}`);
             return res.status(500).json({
                 success: false,
                 message: 'Gagal melakukan git pull. Pastikan Git terpasang dan remote repository tersedia.',
@@ -1342,6 +1427,7 @@ app.post('/api/system/update', requireApiAuth, (req, res) => {
         }
 
         console.log('[Update] Git pull success:', stdout);
+        sendTelegramMessage('⬇️ <b>Update aplikasi dimulai</b>\nGit pull berhasil. Melanjutkan npm install dan restart (jika Linux).');
 
         // Respond to user immediately so they see success before server goes down
         res.json({
@@ -1356,13 +1442,23 @@ app.post('/api/system/update', requireApiAuth, (req, res) => {
             console.log('[Update] Starting npm install and restart sequence...');
 
             exec('npm install --omit=dev', (npmerr) => {
-                if (npmerr) console.error('[Update] NPM install failed:', npmerr);
-                else console.log('[Update] NPM install success');
+                if (npmerr) {
+                    console.error('[Update] NPM install failed:', npmerr);
+                    sendTelegramMessage(`❌ <b>Update aplikasi gagal</b>\nLangkah: npm install --omit=dev\nError: ${npmerr.message}`);
+                } else {
+                    console.log('[Update] NPM install success');
+                    sendTelegramMessage('✅ <b>Update aplikasi: npm install selesai</b>');
+                }
 
                 if (process.platform === 'linux') {
                     console.log('[Update] Linux detected. Triggering systemctl restart...');
                     exec('sudo systemctl restart mediamtx cctv-web', (restarterr) => {
-                        if (restarterr) console.error('[Update] Restart command failed:', restarterr);
+                        if (restarterr) {
+                            console.error('[Update] Restart command failed:', restarterr);
+                            sendTelegramMessage(`⚠️ <b>Update aplikasi: restart gagal</b>\nPeriksa service mediamtx dan cctv-web.\nError: ${restarterr.message}`);
+                        } else {
+                            sendTelegramMessage('🚀 <b>Update aplikasi selesai</b>\nService mediamtx dan cctv-web sudah direstart.');
+                        }
                     });
                 }
             });
