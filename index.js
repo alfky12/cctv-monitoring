@@ -568,6 +568,8 @@ function syncCameras() {
 
 // --- Routes ---
 
+const RECORDINGS_PAGE_LIMIT = 500;
+
 // Public Dashboard
 app.get('/', (req, res) => {
     db.all("SELECT * FROM cameras", [], (err, rows) => {
@@ -586,9 +588,10 @@ app.get('/archive', (req, res) => {
         FROM recordings r 
         LEFT JOIN cameras c ON r.camera_id = c.id 
         ORDER BY r.created_at DESC
+        LIMIT ?
     `;
 
-    db.all(query, [], (err, rows) => {
+    db.all(query, [RECORDINGS_PAGE_LIMIT], (err, rows) => {
         if (err) return console.error(err.message);
 
         // Also get cameras for filter dropdown if needed
@@ -678,8 +681,9 @@ app.get('/admin/recordings', requireAuth, (req, res) => {
         FROM recordings r 
         JOIN cameras c ON r.camera_id = c.id 
         ORDER BY r.created_at DESC
+        LIMIT ?
     `;
-    db.all(query, [], (err, rows) => {
+    db.all(query, [RECORDINGS_PAGE_LIMIT], (err, rows) => {
         if (err) return console.error(err.message);
         res.render('recordings', { recordings: rows, user: req.session.user });
     });

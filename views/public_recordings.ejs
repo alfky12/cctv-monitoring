@@ -243,9 +243,9 @@
                                     </td>
                                     <td class="p-4">
                                         <video class="w-24 h-16 rounded object-cover bg-black" muted playsinline
-                                            preload="metadata" src="/<%= rec.file_path %>"
-                                            onmouseover="this.play()"
-                                            onmouseout="this.pause(); this.currentTime = 0;">
+                                            preload="none" data-src="/<%= rec.file_path %>"
+                                            onmouseenter="startPreview(this)"
+                                            onmouseleave="stopPreview(this)">
                                         </video>
                                     </td>
                                     <td class="p-4 text-gray-300">
@@ -373,6 +373,26 @@
 
     <!-- Main Logic Script -->
     <script>
+        function startPreview(videoEl) {
+            try {
+                if (!videoEl.src && videoEl.dataset && videoEl.dataset.src) {
+                    videoEl.src = videoEl.dataset.src;
+                }
+                videoEl.currentTime = 0;
+                const playPromise = videoEl.play();
+                if (playPromise && playPromise.catch) {
+                    playPromise.catch(() => {});
+                }
+            } catch (e) {}
+        }
+
+        function stopPreview(videoEl) {
+            try {
+                videoEl.pause();
+                videoEl.currentTime = 0;
+            } catch (e) {}
+        }
+
         const modal = document.getElementById('video-modal');
         const player = document.getElementById('modal-player');
         let allRecordings = [];

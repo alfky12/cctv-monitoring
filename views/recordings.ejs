@@ -261,9 +261,9 @@
                                         </td>
                                         <td class="p-4">
                                             <video class="w-24 h-16 rounded object-cover bg-black" muted playsinline
-                                                preload="metadata" src="/<%= rec.file_path %>"
-                                                onmouseover="this.play()"
-                                                onmouseout="this.pause(); this.currentTime = 0;">
+                                                preload="none" data-src="/<%= rec.file_path %>"
+                                                onmouseenter="startPreview(this)"
+                                                onmouseleave="stopPreview(this)">
                                             </video>
                                         </td>
                                         <td class="p-4 text-gray-300">
@@ -399,6 +399,26 @@
         </div>
 
         <script>
+            function startPreview(videoEl) {
+                try {
+                    if (!videoEl.src && videoEl.dataset && videoEl.dataset.src) {
+                        videoEl.src = videoEl.dataset.src;
+                    }
+                    videoEl.currentTime = 0;
+                    const playPromise = videoEl.play();
+                    if (playPromise && playPromise.catch) {
+                        playPromise.catch(() => { });
+                    }
+                } catch (e) { }
+            }
+
+            function stopPreview(videoEl) {
+                try {
+                    videoEl.pause();
+                    videoEl.currentTime = 0;
+                } catch (e) { }
+            }
+
             const modal = document.getElementById('video-modal');
             const player = document.getElementById('modal-player');
             let currentRecording = null;
@@ -416,12 +436,14 @@
             });
             let filteredRecordings = [...allRecordings];
 
-            // Initialize timeline on page load
             document.addEventListener('DOMContentLoaded', () => {
-                renderTimeline();
-
-                // Set today's date as default
-                document.getElementById('dateFilter').valueAsDate = new Date();
+                const dateInput = document.getElementById('dateFilter');
+                if (allRecordings.length > 0) {
+                    const sorted = [...allRecordings].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                    dateInput.valueAsDate = new Date(sorted[0].created_at);
+                } else {
+                    dateInput.valueAsDate = new Date();
+                }
                 filterByDate();
             });
 
