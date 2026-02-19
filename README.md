@@ -79,6 +79,46 @@ Jika Anda ingin melakukan penyesuaian manual, edit file `config.json`:
 
 ---
 
+
+## 🐳 Deployment Docker & CasaOS
+
+### Docker Compose (lokal / VPS)
+```bash
+docker compose up -d --build
+```
+
+Service yang berjalan:
+- `cctv-app` (Web UI): `3003`
+- `mediamtx` RTSP: `8555`
+- `mediamtx` HLS: `8856`
+- `mediamtx` API: `9123`
+
+Data persisten:
+- `config.json`
+- `cameras.db`
+- `recordings/`
+- `mediamtx.yml`
+
+### Build & Publish Image ke GHCR (GitHub Container Registry)
+Repo ini sudah menyiapkan GitHub Actions workflow `docker-publish.yml` untuk build multi-arch (`amd64` + `arm64`) dan push image ke GHCR secara otomatis saat push ke branch `main`/`master` atau saat membuat tag `v*`.
+
+Image target:
+- `ghcr.io/<owner>/cctv-monitoring:latest` (default branch)
+- `ghcr.io/<owner>/cctv-monitoring:<tag/branch/sha>`
+
+Contoh pull manual:
+```bash
+docker pull ghcr.io/alijayanet/cctv-monitoring:latest
+```
+
+### CasaOS
+Import file `docker-compose.casaos.yml` ke CasaOS (Custom Install / Import Compose). File ini sudah diarahkan ke image GHCR agar install lebih praktis tanpa build lokal.
+
+Setelah deploy:
+1. Akses dashboard: `http://IP-CasaOS:3003`
+2. Login admin default: `admin / admin123`
+3. Tambah RTSP kamera dari panel admin.
+
 ## ☁️ Konfigurasi Cloudflare Tunnel (Akses Luar Jaringan)
 
 Karena aplikasi ini menggunakan dua port (Web UI di 3003 dan HLS di 8856), Anda perlu mengonfigurasi dua Public Hostname di Cloudflare Zero Trust:

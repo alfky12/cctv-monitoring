@@ -1,0 +1,56 @@
+name: cctv-monitoring
+services:
+  cctv-monitoring:
+    image: ghcr.io/alijayanet/cctv-monitoring:latest
+    container_name: cctv-monitoring
+    restart: unless-stopped
+    depends_on:
+      - mediamtx
+    environment:
+      TZ: Asia/Jakarta
+      NODE_ENV: production
+      SERVER_PORT: 3003
+      MEDIAMTX_HOST: mediamtx
+      MEDIAMTX_API_PORT: 9123
+      MEDIAMTX_RTSP_PORT: 8555
+      MEDIAMTX_HLS_PORT: 8856
+      MEDIAMTX_PUBLIC_HLS_URL: ""
+    ports:
+      - 3003:3003
+    volumes:
+      - ./config.json:/app/config.json
+      - ./cameras.db:/app/cameras.db
+      - ./recordings:/app/recordings
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    restart: unless-stopped
+    ports:
+      - 8555:8555
+      - 8856:8856
+      - 9123:9123
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml
+      - ./recordings:/recordings
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  author: alijayanet
+  category: Media
+  developer: ALIJAYA-NET
+  hostname: ''
+  icon: https://raw.githubusercontent.com/alijayanet/cctv-monitoring/main/public/icon-192x192.png
+  index: /
+  is_uncontrolled: false
+  main: cctv-monitoring
+  port_map: '3003'
+  scheme: http
+  store_app_id: cctv-monitoring
+  tagline:
+    en_us: Real-time CCTV monitoring with MediaMTX and web dashboard.
+  thumbnail: https://raw.githubusercontent.com/alijayanet/cctv-monitoring/main/public/icon-512x512.png
+  title:
+    en_us: CCTV Monitoring
