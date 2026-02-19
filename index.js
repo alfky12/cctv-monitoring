@@ -6,6 +6,34 @@ const db = require('./database');
 const http = require('http');
 const session = require('express-session');
 const config = require('./config.json');
+
+function applyEnvOverrides(config) {
+    if (process.env.SERVER_PORT) {
+        config.server.port = Number(process.env.SERVER_PORT);
+    }
+
+    if (!config.mediamtx) config.mediamtx = {};
+
+    if (process.env.MEDIAMTX_HOST) {
+        config.mediamtx.host = process.env.MEDIAMTX_HOST;
+    }
+    if (process.env.MEDIAMTX_API_PORT) {
+        config.mediamtx.api_port = Number(process.env.MEDIAMTX_API_PORT);
+    }
+    if (process.env.MEDIAMTX_RTSP_PORT) {
+        config.mediamtx.rtsp_port = Number(process.env.MEDIAMTX_RTSP_PORT);
+    }
+    if (process.env.MEDIAMTX_HLS_PORT) {
+        config.mediamtx.hls_port = Number(process.env.MEDIAMTX_HLS_PORT);
+    }
+    if (process.env.MEDIAMTX_PUBLIC_HLS_URL !== undefined) {
+        config.mediamtx.public_hls_url = process.env.MEDIAMTX_PUBLIC_HLS_URL;
+    }
+
+    return config;
+}
+
+applyEnvOverrides(config);
 const telegramBot = require('./telegram_bot');
 const webPush = require('web-push');
 
