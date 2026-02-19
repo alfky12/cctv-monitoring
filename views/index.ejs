@@ -421,14 +421,10 @@
                             const text = document.getElementById(`status-text-${id}`);
 
                             if (dot && text) {
-                                // Default to offline if status is undefined/null
-                                const isOnline = status && status.online;
-                                const isTranscoded = data.transcode && data.transcode[id] && data.transcode[id].transcoded;
-
-                                if (isOnline) {
+                                if (status.online) {
                                     dot.classList.remove('bg-gray-600', 'bg-red-500', 'bg-purple-500');
-                                    
-                                    if (isTranscoded) {
+                                    const tc = data.transcode && data.transcode[id];
+                                    if (tc && tc.transcoded) {
                                         dot.classList.add('bg-purple-500', 'animate-pulse');
                                         text.innerText = 'H.264';
                                         text.classList.remove('text-gray-500', 'text-red-500', 'text-green-500');
@@ -663,14 +659,6 @@
                 }
 
                 function initMap() {
-                    // Fix Leaflet Default Icon Issue
-                    delete L.Icon.Default.prototype._getIconUrl;
-                    L.Icon.Default.mergeOptions({
-                        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-                        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-                    });
-
                     // Default center (Jakarta) or first camera location
                     let center = [-6.2088, 106.8456];
                     const validCam = camerasData.find(c => c.lat && c.lng);

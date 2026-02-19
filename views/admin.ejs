@@ -530,11 +530,7 @@
                     <!-- Presets Section -->
                     <div class="mb-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
                         <label class="block text-sm font-medium text-gray-300 mb-2">Pilih Preset (Opsional)</label>
-                        <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
-                            <button type="button" onclick="applyPreset('24h')"
-                                class="px-3 py-2 bg-orange-600 hover:bg-orange-700 rounded text-sm text-white transition font-bold shadow-lg transform hover:scale-105">
-                                24 Jam<br><span class="text-xs text-gray-200">Rekaman Nonstop</span>
-                            </button>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
                             <button type="button" onclick="applyPreset('ultra-compact')"
                                 class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-300 transition">
                                 Ultra Compact<br><span class="text-xs text-gray-500">~50 MB/jam</span>
@@ -1091,24 +1087,18 @@
 
         // Apply preset function
         function applyPreset(presetName) {
-            const form = document.getElementById('recordingSettingsForm');
-            if (!form) return;
-
-            if (presetName === '24h') {
-                form.start_time.value = '00:00';
-                form.end_time.value = '23:59';
-                return;
-            }
-
             const preset = presets[presetName];
             if (!preset) return;
 
-            form.video_codec.value = preset.video_codec;
-            form.resolution.value = preset.resolution;
-            form.frame_rate.value = preset.frame_rate;
-            form.bitrate.value = preset.bitrate;
-            form.audio_enabled.value = preset.audio_enabled;
-            updateStorageEstimate();
+            const form = document.getElementById('recordingSettingsForm');
+            if (form) {
+                form.video_codec.value = preset.video_codec;
+                form.resolution.value = preset.resolution;
+                form.frame_rate.value = preset.frame_rate;
+                form.bitrate.value = preset.bitrate;
+                form.audio_enabled.value = preset.audio_enabled;
+                updateStorageEstimate();
+            }
         }
 
         // Storage estimation function
@@ -1438,14 +1428,6 @@
         let pickerMap = null;
         let pickerMarker = null;
 
-        // Fix Leaflet Default Icon Issue
-        delete L.Icon.Default.prototype._getIconUrl;
-        L.Icon.Default.mergeOptions({
-            iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-            iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-        });
-
         function initPickerMap() {
             if (pickerMap) return;
 
@@ -1686,11 +1668,6 @@
             const statusMsg = document.getElementById('update-status-msg');
             const updateBtn = document.getElementById('updateAppBtn');
 
-            if (!remoteEl || !statusMsg || !updateBtn) {
-                console.error('Error: DOM elements not found');
-                return;
-            }
-
             remoteEl.textContent = 'Mengecek...';
             remoteEl.className = 'text-gray-500 animate-pulse';
             statusMsg.classList.add('hidden');
@@ -1698,7 +1675,6 @@
             try {
                 // Gunakan URL raw github yang sesuai dari config
                 const repoUrl = '<%= repository_url %>';
-                console.log('Repository URL:', repoUrl);
                 const GITHUB_RAW_VERSION_URL = `https://raw.githubusercontent.com/${repoUrl}/main/version.txt`;
 
                 console.log('Checking for updates at:', GITHUB_RAW_VERSION_URL);
@@ -1706,7 +1682,6 @@
                 if (!res.ok) throw new Error('Not found at ' + GITHUB_RAW_VERSION_URL);
 
                 const remoteVersion = (await res.text()).trim();
-                console.log('Remote version:', remoteVersion, 'Local version:', localVersion);
                 remoteEl.textContent = remoteVersion;
                 remoteEl.classList.remove('animate-pulse');
 
@@ -1724,12 +1699,8 @@
                     updateBtn.classList.remove('animate-bounce');
                 }
             } catch (err) {
-                console.error('Check update error:', err);
                 remoteEl.textContent = 'Gagal Cek';
                 remoteEl.className = 'text-red-400 font-mono text-lg';
-                statusMsg.textContent = 'Error: ' + err.message;
-                statusMsg.className = 'text-xs text-center py-1 px-4 rounded bg-red-900/30 text-red-400 block';
-                statusMsg.classList.remove('hidden');
             }
         }
 
@@ -1744,12 +1715,6 @@
             const spin = document.getElementById('updateBtnSpin');
             const output = document.getElementById('updateOutput');
 
-            if (!btn || !text || !spin || !output) {
-                console.error('Error: DOM elements not found');
-                alert('Error: Element UI tidak ditemukan. Silakan refresh halaman.');
-                return;
-            }
-
             btn.disabled = true;
             text.textContent = 'Sedang Mengupdate...';
             spin.classList.remove('hidden');
@@ -1758,17 +1723,8 @@
             btn.classList.remove('animate-bounce');
 
             try {
-                console.log('Sending update request to API...');
                 const res = await fetch('/api/system/update', { method: 'POST' });
-                console.log('Response status:', res.status);
-
-                if (!res.ok) {
-                    const errorData = await res.json();
-                    throw new Error(errorData.message || errorData.error || 'Update failed');
-                }
-
                 const data = await res.json();
-                console.log('Update response:', data);
 
                 spin.classList.add('hidden');
                 output.classList.remove('hidden');
@@ -1789,17 +1745,10 @@
                     btn.disabled = false;
                 }
             } catch (err) {
-                console.error('Update error:', err);
-                alert('Terjadi kesalahan: ' + err.message);
-                if (output) {
-                    output.classList.remove('hidden');
-                    output.textContent = 'ERROR:\n' + err.message;
-                }
-                if (btn) {
-                    btn.disabled = false;
-                    text.textContent = 'Cek & Update Sekarang';
-                    spin.classList.add('hidden');
-                }
+                alert('Terjadi kesalahan koneksi saat mencoba update.');
+                btn.disabled = false;
+                text.textContent = 'Cek & Update Sekarang';
+                spin.classList.add('hidden');
             }
         }
     </script>

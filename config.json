@@ -12,20 +12,16 @@
     "mediamtx": {
         "host": "127.0.0.1",
         "api_port": 9123,
-        "rtsp_port": 8555,
         "hls_port": 8856,
         "public_hls_url": "https://stream.alijaya.com"
-    },
-    "onvif": {
-        "discovery_timeout": 8000
     },
     "site": {
         "title": "CCTV Monitor",
         "footer": "Monitoring System by ALIJAYA-NET",
-        "running_text": "Selamat Datang di CCTV Monitoring Publik"
+        "running_text": "Selamat Datang di CCTV Monitoring Publik Untuk donasi silahkan ke ewallet 081947215703"
     },
     "recording": {
-        "enabled": false,
+        "enabled": true,
         "start_time": "00:00",
         "end_time": "23:59",
         "segment_duration": "60m",

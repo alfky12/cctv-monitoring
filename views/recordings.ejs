@@ -267,7 +267,7 @@
                                             </video>
                                         </td>
                                         <td class="p-4 text-gray-300">
-                                            <%= new Date(rec.created_at).toLocaleString('id-ID') %>
+                                            <%= new Date(rec.created_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) %>
                                         </td>
                                         <td class="p-4 text-gray-400 text-sm">
                                             <%= rec.duration ? rec.duration + 's' : '-' %>
@@ -436,11 +436,54 @@
             });
             let filteredRecordings = [...allRecordings];
 
+            function parseLocalDateTime(value) {
+                if (!value) return null;
+                const raw = String(value);
+                let datePart = raw;
+                let timePart = '00:00:00';
+                if (raw.includes('T')) {
+                    const parts = raw.split('T');
+                    datePart = parts[0];
+                    timePart = parts[1] || '00:00:00';
+                } else if (raw.includes(' ')) {
+                    const parts = raw.split(' ');
+                    datePart = parts[0];
+                    timePart = parts[1] || '00:00:00';
+                }
+                const datePieces = datePart.split('-').map(Number);
+                if (datePieces.length !== 3 || !datePieces[0] || !datePieces[1] || !datePieces[2]) return null;
+                const timeClean = String(timePart).replace('Z', '').split('.')[0];
+                const timePieces = timeClean.split(':').map(Number);
+                const hours = timePieces[0] || 0;
+                const minutes = timePieces[1] || 0;
+                const seconds = timePieces[2] || 0;
+                return new Date(datePieces[0], datePieces[1] - 1, datePieces[2], hours, minutes, seconds);
+            }
+
+            function getDateKey(value) {
+                if (!value) return '';
+                const raw = String(value);
+                if (raw.includes('T')) return raw.split('T')[0];
+                if (raw.includes(' ')) return raw.split(' ')[0];
+                if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+                const dt = parseLocalDateTime(raw);
+                if (!dt || isNaN(dt.getTime())) return '';
+                const y = dt.getFullYear();
+                const m = String(dt.getMonth() + 1).padStart(2, '0');
+                const d = String(dt.getDate()).padStart(2, '0');
+                return `${y}-${m}-${d}`;
+            }
+
             document.addEventListener('DOMContentLoaded', () => {
                 const dateInput = document.getElementById('dateFilter');
                 if (allRecordings.length > 0) {
-                    const sorted = [...allRecordings].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                    dateInput.valueAsDate = new Date(sorted[0].created_at);
+                    const sorted = [...allRecordings].sort((a, b) => {
+                        const bTime = parseLocalDateTime(b.created_at);
+                        const aTime = parseLocalDateTime(a.created_at);
+                        return (bTime ? bTime.getTime() : 0) - (aTime ? aTime.getTime() : 0);
+                    });
+                    const latestDate = parseLocalDateTime(sorted[0].created_at);
+                    dateInput.valueAsDate = latestDate || new Date();
                 } else {
                     dateInput.valueAsDate = new Date();
                 }
@@ -460,12 +503,12 @@
                 const dateFilter = document.getElementById('dateFilter').value;
                 if (!dateFilter) return;
 
-                const selectedDate = new Date(dateFilter);
+                const selectedDate = parseLocalDateTime(`${dateFilter} 00:00:00`) || new Date(dateFilter);
                 const dayStart = new Date(selectedDate.setHours(0, 0, 0, 0));
                 const dayEnd = new Date(selectedDate.setHours(23, 59, 59, 999));
 
                 filteredRecordings.forEach(rec => {
-                    const recTime = new Date(rec.created_at);
+                    const recTime = parseLocalDateTime(rec.created_at) || new Date(rec.created_at);
                     if (recTime >= dayStart && recTime <= dayEnd) {
                         const segment = createTimelineSegment(rec, dayStart, dayEnd);
                         timeline.appendChild(segment);
@@ -477,7 +520,7 @@
                 const segment = document.createElement('div');
                 segment.className = 'timeline-segment';
 
-                const recTime = new Date(recording.created_at);
+                const recTime = parseLocalDateTime(recording.created_at) || new Date(recording.created_at);
                 const dayDuration = dayEnd - dayStart;
                 const position = ((recTime - dayStart) / dayDuration) * 100;
 
@@ -492,7 +535,7 @@
                 tooltip.className = 'timeline-tooltip';
                 tooltip.innerHTML = `
                 <strong>${recording.camera_name}</strong><br>
-                ${recTime.toLocaleTimeString('id-ID')}<br>
+                ${recTime.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })}<br>
                 ${(recording.size / (1024 * 1024)).toFixed(1)} MB
             `;
                 segment.appendChild(tooltip);
@@ -518,7 +561,7 @@
                 const dateFilter = document.getElementById('dateFilter').value;
                 if (!dateFilter) return;
 
-                const selectedDate = new Date(dateFilter);
+                const selectedDate = parseLocalDateTime(`${dateFilter} 00:00:00`) || new Date(dateFilter);
                 const totalSeconds = percent * 86400; // 24 hours in seconds
                 const hours = Math.floor(totalSeconds / 3600);
                 const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -542,7 +585,7 @@
                 let minDiff = Infinity;
 
                 filteredRecordings.forEach(rec => {
-                    const recTime = new Date(rec.created_at);
+                    const recTime = parseLocalDateTime(rec.created_at) || new Date(rec.created_at);
                     const diff = Math.abs(recTime - targetTime);
                     if (diff < minDiff) {
                         minDiff = diff;
@@ -577,9 +620,7 @@
                     let matchCamera = true;
 
                     if (dateFilter) {
-                        const recDate = new Date(rec.created_at).toDateString();
-                        const filterDate = new Date(dateFilter).toDateString();
-                        matchDate = recDate === filterDate;
+                    matchDate = getDateKey(rec.created_at) === dateFilter;
                     }
 
                     if (cameraFilter) {
@@ -600,9 +641,8 @@
                     let show = true;
                     if (cameraFilter && camera !== cameraFilter) show = false;
                     if (dateFilter) {
-                        const rowDate = new Date(time).toDateString();
-                        const filterDate = new Date(dateFilter).toDateString();
-                        if (rowDate !== filterDate) show = false;
+                    const rowDate = getDateKey(time);
+                    if (rowDate !== dateFilter) show = false;
                     }
 
                     row.style.display = show ? '' : 'none';
@@ -637,7 +677,7 @@
                 player.playbackRate = 1;
 
                 document.getElementById('videoTitle').textContent = cameraName || 'Video Recording';
-                document.getElementById('videoInfo').textContent = createdAt ? new Date(createdAt).toLocaleString('id-ID') : '';
+                document.getElementById('videoInfo').textContent = createdAt ? new Date(createdAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) : '';
                 document.getElementById('error-download-link').href = url;
 
                 player.play().catch(e => {
