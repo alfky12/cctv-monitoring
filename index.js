@@ -560,7 +560,9 @@ async function registerCamera(cam) {
     return mediaMtxRequest('POST', '/add/' + pathName, {
         name: pathName,
         source: cam.url_rtsp,
-        sourceOnDemand: false
+        sourceOnDemand: false,
+        rtspTransport: 'tcp',
+        sourceProtocol: 'tcp'
     });
 }
 

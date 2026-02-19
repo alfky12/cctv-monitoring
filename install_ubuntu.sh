@@ -42,6 +42,7 @@ if [ ! -f "mediamtx" ]; then
     wget -O mediamtx.tar.gz "$DOWNLOAD_URL"
     tar -xvzf mediamtx.tar.gz mediamtx mediamtx.yml
     rm mediamtx.tar.gz
+    chmod +x mediamtx
 fi
 
 # --- 5. Create Supporting Scripts (Clean Bash Format) ---
@@ -165,18 +166,44 @@ EOF
 chmod +x smart_transcode.sh record_notify.sh
 
 # --- 6. Patching Configuration ---
-echo "Patching mediamtx.yml..."
-cp mediamtx.yml mediamtx.yml.bak
-sed -i 's/rtspAddress: :8554/rtspAddress: :8555/g' mediamtx.yml
-sed -i 's/hlsAddress: :8888/hlsAddress: :8856/g' mediamtx.yml
-sed -i 's/apiAddress: :[0-9]\+/apiAddress: :9123/g' mediamtx.yml
-sed -i 's/^api: .*/api: yes/g' mediamtx.yml
-# Set HLS to fMP4 for H265 support
-sed -i 's/hlsVariant: .*/hlsVariant: fmp4/g' mediamtx.yml
-# Set recording retention to 7 days
-sed -i 's/recordDeleteAfter: .*/recordDeleteAfter: 7d/g' mediamtx.yml
-# Linux: use .sh for record notify (Node app will also set runOnReady via API on startup)
-sed -i 's/record_notify\.bat/record_notify.sh/g' mediamtx.yml
+# Konfigurasi Port
+# RTSP: 8555
+# RTP: 8100
+# RTCP: 8101
+# RTMP: 1936
+# HLS: 8856
+# WebRTC: 8890
+# WebRTC UDP: 8190
+# API: 9123
+
+echo "🔧 Mengkonfigurasi MediaMTX dengan port custom..."
+cat <<EOF > mediamtx.yml
+paths:
+  all:
+    source: publisher
+
+# RTSP
+rtsp: yes
+rtspTransports: [tcp]
+rtspAddress: :8555
+rtpAddress: :8100
+rtcpAddress: :8101
+
+# RTMP
+rtmpAddress: :1936
+
+# HLS
+hlsAddress: :8856
+hlsVariant: fmp4
+
+# WebRTC
+webrtcAddress: :8890
+webrtcLocalUDPAddress: :8190
+
+# API
+api: yes
+apiAddress: :9123
+EOF
 
 # --- 7. Setup Services ---
 CURRENT_USER=$(whoami)
