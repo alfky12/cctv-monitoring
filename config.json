@@ -25,7 +25,14 @@
         "start_time": "06:00",
         "end_time": "23:59",
         "segment_duration": "60m",
-        "delete_after": "7d"
+        "delete_after": "7d",
+        "video_codec": "h264",
+        "resolution": "720p",
+        "frame_rate": 12,
+        "bitrate": "800k",
+        "max_bitrate": "900k",
+        "audio_enabled": true,
+        "audio_bitrate": "64k"
     },
     "telegram": {
         "enabled": false,

@@ -802,14 +802,23 @@ app.post('/api/settings', requireApiAuth, (req, res) => {
 
 // Update Recording Settings
 app.post('/api/settings/recording', requireApiAuth, (req, res) => {
-    const { enabled, start_time, end_time, segment_duration, delete_after } = req.body;
+    const { enabled, start_time, end_time, segment_duration, delete_after,
+            video_codec, resolution, frame_rate, bitrate, max_bitrate,
+            audio_enabled, audio_bitrate } = req.body;
 
     config.recording = {
         enabled: enabled === 'true' || enabled === true,
-        start_time,
-        end_time,
-        segment_duration,
-        delete_after
+        start_time: start_time || config.recording.start_time,
+        end_time: end_time || config.recording.end_time,
+        segment_duration: segment_duration || config.recording.segment_duration,
+        delete_after: delete_after || config.recording.delete_after,
+        video_codec: video_codec || config.recording.video_codec || 'h264',
+        resolution: resolution || config.recording.resolution || '720p',
+        frame_rate: frame_rate || config.recording.frame_rate || 12,
+        bitrate: bitrate || config.recording.bitrate || '800k',
+        max_bitrate: max_bitrate || config.recording.max_bitrate || '900k',
+        audio_enabled: audio_enabled !== undefined ? audio_enabled : (config.recording.audio_enabled !== undefined ? config.recording.audio_enabled : true),
+        audio_bitrate: audio_bitrate || config.recording.audio_bitrate || '64k'
     };
 
     const fs = require('fs');
@@ -817,7 +826,7 @@ app.post('/api/settings/recording', requireApiAuth, (req, res) => {
         if (err) return res.status(500).json({ error: 'Failed save' });
         app.locals.recording = config.recording;
         updateMediaMtxRecording(); // Apply immediately
-        res.json({ message: "Recording settings updated" });
+        res.json({ message: "Recording settings updated", recording: config.recording });
     });
 });
 
@@ -1301,6 +1310,33 @@ async function sendPushNotification(title, body, url = '/') {
     await Promise.all(sendPromises);
 }
 
+// Cleanup orphan recordings whose files were deleted by MediaMTX retention
+function cleanupOrphanRecordings() {
+    const fs = require('fs');
+    const baseDir = __dirname;
+
+    db.all('SELECT id, file_path FROM recordings', [], (err, rows) => {
+        if (err || !rows || rows.length === 0) return;
+
+        let deleted = 0;
+
+        rows.forEach((row) => {
+            const fullPath = path.join(baseDir, row.file_path);
+            if (!fs.existsSync(fullPath)) {
+                db.run('DELETE FROM recordings WHERE id = ?', [row.id], (delErr) => {
+                    if (!delErr) {
+                        deleted += 1;
+                    }
+                });
+            }
+        });
+
+        if (deleted > 0) {
+            console.log(`[Cleanup] Removed ${deleted} orphan recordings without files`);
+        }
+    });
+}
+
 // Global Error Handler
 app.use((err, req, res, next) => {
     console.error('Global Error:', err.stack);
@@ -1492,6 +1528,8 @@ app.listen(PORT, () => {
 
         // Scan and import existing recordings
         scanExistingRecordings();
+        // Cleanup orphan DB rows for recordings whose files are already gone
+        cleanupOrphanRecordings();
     }, 2000);
 
     // Periodically check recording schedule every minute
@@ -1500,4 +1538,7 @@ app.listen(PORT, () => {
     // Periodically check system health every 10 seconds
     setInterval(updateSystemHealth, 10000);
     updateSystemHealth();
+
+    // Periodically cleanup orphan recordings every 6 hours
+    setInterval(cleanupOrphanRecordings, 6 * 60 * 60 * 1000);
 });

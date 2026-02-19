@@ -58,6 +58,9 @@ const db = new sqlite3.Database(dbPath, (err) => {
         )`, (err) => {
             if (err) {
                 console.error('Error creating recordings table:', err.message);
+            } else {
+                db.run(`CREATE INDEX IF NOT EXISTS idx_recordings_created_at ON recordings(created_at)`);
+                db.run(`CREATE INDEX IF NOT EXISTS idx_recordings_camera_time ON recordings(camera_id, created_at)`);
             }
         });
     }

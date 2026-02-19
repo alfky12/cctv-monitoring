@@ -6,10 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel - CCTV</title>
     <link rel="stylesheet" href="/css/tailwind.css">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <link rel="stylesheet" href="/css/leaflet.css" />
+    <script src="/js/leaflet.js"></script>
     <style>
         body {
             background-color: #1a202c;
@@ -528,6 +526,30 @@
                         </svg>
                         Jadwal & Pengaturan Rekaman
                     </h2>
+
+                    <!-- Presets Section -->
+                    <div class="mb-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Pilih Preset (Opsional)</label>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            <button type="button" onclick="applyPreset('ultra-compact')"
+                                class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-300 transition">
+                                Ultra Compact<br><span class="text-xs text-gray-500">~50 MB/jam</span>
+                            </button>
+                            <button type="button" onclick="applyPreset('compact')"
+                                class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-300 transition">
+                                Compact<br><span class="text-xs text-gray-500">~100 MB/jam</span>
+                            </button>
+                            <button type="button" onclick="applyPreset('standard')"
+                                class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-300 transition">
+                                Standard<br><span class="text-xs text-gray-500">~150 MB/jam</span>
+                            </button>
+                            <button type="button" onclick="applyPreset('high-quality')"
+                                class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-300 transition">
+                                High Quality<br><span class="text-xs text-gray-500">~250 MB/jam</span>
+                            </button>
+                        </div>
+                    </div>
+
                     <form id="recordingSettingsForm" method="POST"
                         class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 items-end">
                         <div class="col-span-1">
@@ -581,11 +603,71 @@
                                     !recording.enabled)) ? 'selected' : '' %>>Master OFF</option>
                             </select>
                         </div>
+
+                        <!-- Video Settings Row -->
+                        <div class="col-span-1">
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Video Codec</label>
+                            <select name="video_codec"
+                                class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-orange-500">
+                                <option value="h264" <%=(locals.recording && recording.video_codec==='h264') ? 'selected' : '' %>>H.264 (Kompatibel)</option>
+                                <option value="h265" <%=(locals.recording && recording.video_codec==='h265') ? 'selected' : '' %>>H.265 (Hemat Disk)</option>
+                            </select>
+                        </div>
+                        <div class="col-span-1">
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Resolution</label>
+                            <select name="resolution"
+                                class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-orange-500">
+                                <option value="720p" <%=(locals.recording && recording.resolution==='720p') ? 'selected' : '' %>>720p (HD)</option>
+                                <option value="1080p" <%=(locals.recording && recording.resolution==='1080p') ? 'selected' : '' %>>1080p (Full HD)</option>
+                                <option value="D1" <%=(locals.recording && recording.resolution==='D1') ? 'selected' : '' %>>D1 (SD)</option>
+                            </select>
+                        </div>
+                        <div class="col-span-1">
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Frame Rate (FPS)</label>
+                            <select name="frame_rate"
+                                class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-orange-500">
+                                <option value="10" <%=(locals.recording && recording.frame_rate===10) ? 'selected' : '' %>>10 fps</option>
+                                <option value="12" <%=(locals.recording && (recording.frame_rate===12 || !recording.frame_rate)) ? 'selected' : '' %>>12 fps</option>
+                                <option value="15" <%=(locals.recording && recording.frame_rate===15) ? 'selected' : '' %>>15 fps</option>
+                                <option value="24" <%=(locals.recording && recording.frame_rate===24) ? 'selected' : '' %>>24 fps</option>
+                                <option value="30" <%=(locals.recording && recording.frame_rate===30) ? 'selected' : '' %>>30 fps</option>
+                            </select>
+                        </div>
+                        <div class="col-span-1">
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Bitrate</label>
+                            <select name="bitrate"
+                                class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-orange-500">
+                                <option value="400k" <%=(locals.recording && recording.bitrate==='400k') ? 'selected' : '' %>>Low (400k)</option>
+                                <option value="800k" <%=(locals.recording && (recording.bitrate==='800k' || !recording.bitrate)) ? 'selected' : '' %>>Medium (800k)</option>
+                                <option value="1200k" <%=(locals.recording && recording.bitrate==='1200k') ? 'selected' : '' %>>High (1200k)</option>
+                                <option value="2000k" <%=(locals.recording && recording.bitrate==='2000k') ? 'selected' : '' %>>Very High (2000k)</option>
+                            </select>
+                        </div>
+                        <div class="col-span-1">
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Audio</label>
+                            <select name="audio_enabled"
+                                class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-orange-500">
+                                <option value="true" <%=(locals.recording && recording.audio_enabled===true) ? 'selected' : '' %>>ON</option>
+                                <option value="false" <%=(locals.recording && recording.audio_enabled===false) ? 'selected' : '' %>>OFF</option>
+                            </select>
+                        </div>
+
                         <button type="submit"
                             class="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-6 rounded shadow-lg transition transform active:scale-95">
-                            Simpan Jadwal
+                            Simpan Pengaturan
                         </button>
                     </form>
+
+                    <!-- Storage Estimation -->
+                    <div class="mt-4 p-3 bg-gray-900 rounded border border-gray-700">
+                        <p class="text-sm text-gray-400">
+                            <span class="text-orange-400 font-medium">Estimasi Storage:</span>
+                            <span id="storageEstimate">~100 MB/jam/kamera</span>
+                            <span class="text-gray-500">|</span>
+                            <span id="dailyEstimate">~2.4 GB/hari (24 kamera)</span>
+                        </p>
+                    </div>
+
                     <p class="text-xs text-gray-500 mt-2 italic">* Pengaturan ini akan diterapkan ke semua kamera yang
                         aktif.</p>
                 </div>
@@ -960,14 +1042,118 @@
                 });
 
                 if (response.ok) {
-                    alert('Jadwal rekaman berhasil disimpan');
+                    alert('Pengaturan rekaman berhasil disimpan');
                     window.location.reload();
                 } else {
-                    alert('Gagal menyimpan jadwal rekaman');
+                    alert('Gagal menyimpan pengaturan rekaman');
                 }
             } catch (err) {
                 console.error(err);
                 alert('Terjadi kesalahan koneksi');
+            }
+        });
+
+        // Preset definitions
+        const presets = {
+            'ultra-compact': {
+                video_codec: 'h265',
+                resolution: '720p',
+                frame_rate: 10,
+                bitrate: '400k',
+                audio_enabled: 'true'
+            },
+            'compact': {
+                video_codec: 'h264',
+                resolution: '720p',
+                frame_rate: 12,
+                bitrate: '800k',
+                audio_enabled: 'true'
+            },
+            'standard': {
+                video_codec: 'h264',
+                resolution: '1080p',
+                frame_rate: 15,
+                bitrate: '1200k',
+                audio_enabled: 'true'
+            },
+            'high-quality': {
+                video_codec: 'h264',
+                resolution: '1080p',
+                frame_rate: 30,
+                bitrate: '2000k',
+                audio_enabled: 'true'
+            }
+        };
+
+        // Apply preset function
+        function applyPreset(presetName) {
+            const preset = presets[presetName];
+            if (!preset) return;
+
+            const form = document.getElementById('recordingSettingsForm');
+            if (form) {
+                form.video_codec.value = preset.video_codec;
+                form.resolution.value = preset.resolution;
+                form.frame_rate.value = preset.frame_rate;
+                form.bitrate.value = preset.bitrate;
+                form.audio_enabled.value = preset.audio_enabled;
+                updateStorageEstimate();
+            }
+        }
+
+        // Storage estimation function
+        function updateStorageEstimate() {
+            const form = document.getElementById('recordingSettingsForm');
+            if (!form) return;
+
+            const codec = form.video_codec.value;
+            const resolution = form.resolution.value;
+            const fps = parseInt(form.frame_rate.value) || 12;
+            const bitrate = parseInt(form.bitrate.value) || 800;
+
+            // Base storage calculation (MB per hour per camera)
+            let baseStorage = bitrate / 8; // Convert kbps to KB/s
+            baseStorage = baseStorage * 3600 / 1024 / 1024; // Convert to MB per hour
+
+            // Adjust for codec (H.265 is ~50% more efficient)
+            if (codec === 'h265') {
+                baseStorage = baseStorage * 0.5;
+            }
+
+            // Adjust for resolution (1080p is ~2.25x larger than 720p)
+            if (resolution === '1080p') {
+                baseStorage = baseStorage * 2.25;
+            } else if (resolution === 'D1') {
+                baseStorage = baseStorage * 0.56;
+            }
+
+            // Adjust for frame rate
+            baseStorage = baseStorage * (fps / 12);
+
+            // Add audio (64k)
+            if (form.audio_enabled.value === 'true') {
+                baseStorage += 28; // ~28 MB per hour for audio
+            }
+
+            // Display estimates
+            const hourlyPerCamera = Math.round(baseStorage);
+            const dailyPerCamera = hourlyPerCamera * 24;
+
+            document.getElementById('storageEstimate').textContent = `~${hourlyPerCamera} MB/jam/kamera`;
+            document.getElementById('dailyEstimate').textContent = `~${(dailyPerCamera / 1024).toFixed(1)} GB/hari/kamera`;
+        }
+
+        // Initialize storage estimate on load and on change
+        document.addEventListener('DOMContentLoaded', () => {
+            updateStorageEstimate();
+
+            const form = document.getElementById('recordingSettingsForm');
+            if (form) {
+                form.video_codec?.addEventListener('change', updateStorageEstimate);
+                form.resolution?.addEventListener('change', updateStorageEstimate);
+                form.frame_rate?.addEventListener('change', updateStorageEstimate);
+                form.bitrate?.addEventListener('change', updateStorageEstimate);
+                form.audio_enabled?.addEventListener('change', updateStorageEstimate);
             }
         });
 
