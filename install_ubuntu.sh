@@ -60,19 +60,22 @@ if [[ "$MTX_PATH" != *"_input"* ]]; then
     exit 0
 fi
 
-SOURCE_RTSP="rtsp://127.0.0.1:8555/$MTX_PATH"
-TARGET_NAME="${MTX_PATH/_input/}"
-TARGET_RTSP="rtsp://127.0.0.1:8555/$TARGET_NAME"
-
 # Read recording settings from config.json with fallback values
 CONFIG_FILE="$SCRIPT_DIR/config.json"
 
-# Helper function to parse JSON value
+# Helper function to parse JSON value (supports strings and numbers)
 get_config_value() {
     local key="$1"
     local default="$2"
     if [ -f "$CONFIG_FILE" ]; then
-        local value=$(grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$CONFIG_FILE" | grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | cut -d'"' -f4)
+        # Try matching string value first: "key": "value"
+        local value=$(grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$CONFIG_FILE" | cut -d'"' -f4)
+        
+        # If empty, try matching number/boolean value: "key": 123 or "key": true
+        if [ -z "$value" ]; then
+            value=$(grep -o "\"$key\"[[:space:]]*:[[:space:]]*[^,}]*" "$CONFIG_FILE" | cut -d':' -f2 | tr -d ' "')
+        fi
+        
         if [ -n "$value" ]; then
             echo "$value"
         else
@@ -82,6 +85,16 @@ get_config_value() {
         echo "$default"
     fi
 }
+
+# Get RTSP port from config or default to 8555
+RTSP_PORT=$(get_config_value "rtsp_port" "8555")
+if [ -z "$RTSP_PORT" ]; then
+    RTSP_PORT="8555"
+fi
+
+SOURCE_RTSP="rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH"
+TARGET_NAME="${MTX_PATH/_input/}"
+TARGET_RTSP="rtsp://127.0.0.1:$RTSP_PORT/$TARGET_NAME"
 
 VIDEO_CODEC_CONFIG=$(get_config_value "video_codec" "h264")
 RESOLUTION_CONFIG=$(get_config_value "resolution" "720p")

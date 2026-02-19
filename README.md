@@ -7,7 +7,7 @@ A powerful, lightweight, and modern web application for real-time CCTV monitorin
 [![MediaMTX](https://img.shields.io/badge/Streaming-MediaMTX-orange?style=for-the-badge&logo=ffmpeg)](https://github.com/bluenviron/mediamtx)
 
 ---
-https://cctv.alijaya.com
+
 ## ✨ Fitur Unggulan
 
 *   🖥️ **Modern Dashboard**: Tampilan grid yang responsif dan elegan untuk melihat semua kamera sekaligus.
@@ -45,6 +45,23 @@ chmod +x install_ubuntu.sh
 ```
 
 Skrip ini akan otomatis menginstal **Node.js, FFmpeg, MediaMTX**, serta mengkonfigurasi **Systemd Service** agar aplikasi berjalan otomatis saat booting.
+
+---
+
+## ▶️ Jalankan Secara Manual (Tanpa Installer)
+
+-   **Linux / Ubuntu / Debian**  
+    ```bash
+    npm install
+    ./start.sh
+    ```
+-   **Windows**  
+    1. Install Node.js 20.x dari situs resmi.  
+    2. Buka Command Prompt di folder project, lalu:
+       ```bat
+       npm install
+       start.bat
+       ```
 
 ---
 
@@ -112,4 +129,3 @@ Distributed under the **MIT License**. Lihat `LICENSE` untuk informasi lebih lan
 
 ---
 Built with ❤️ by **ALIJAYA-NET** 🇮🇩
-

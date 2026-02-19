@@ -6,6 +6,7 @@ const db = require('./database');
 const http = require('http');
 const session = require('express-session');
 const config = require('./config.json');
+const telegramBot = require('./telegram_bot');
 const webPush = require('web-push');
 
 const app = express();
@@ -176,7 +177,7 @@ const sessionMiddleware = session({
     cookie: {
         // Apply 'secure' flag ONLY if the request is actually secure
         // This allows local IP (HTTP) to work while keeping HTTPS secure
-        secure: behindProxy, 
+        secure: false, // Changed to false to allow login via HTTP/IP
         maxAge: 24 * 60 * 60 * 1000,
         sameSite: 'lax'
     }
@@ -1646,6 +1647,17 @@ app.listen(PORT, () => {
 
     console.log(`Server is running on http://localhost:${PORT}`);
 
+    // Initialize Telegram Bot
+    telegramBot.init(config, db, {
+        getCameraStatus: () => cameraStatus,
+        getDiskUsage: () => diskUsage,
+        restartSystem: telegramRestartSystem,
+        cleanupRecordings: telegramCleanupWrapper,
+        getRtspTemplates: () => RTSP_TEMPLATES,
+        generateRtspUrl: generateRtspUrl,
+        updateAdminCredentials: telegramUpdateAdminCredentials
+    });
+
     // Initialize push notifications
     const publicKey = initializeWebPush();
     if (publicKey) {
@@ -1677,3 +1689,121 @@ app.listen(PORT, () => {
     // Periodically cleanup orphan recordings every 6 hours
     setInterval(cleanupOrphanRecordings, 6 * 60 * 60 * 1000);
 });
+
+// --- Telegram Bot Helpers ---
+
+function telegramRestartSystem() {
+    const { exec } = require('child_process');
+    console.log('[System] Restart requested via Telegram');
+    
+    // Notify first
+    setTimeout(() => {
+        if (process.platform === 'linux') {
+            exec('sudo systemctl restart mediamtx cctv-web', (err) => {
+                if (err) {
+                    console.error('Restart failed:', err);
+                    process.exit(0); // Fallback
+                }
+            });
+        } else {
+            process.exit(0);
+        }
+    }, 1000);
+}
+
+function telegramDeleteOldRecordings(days, callback) {
+    if (!days || days < 1) return callback({ error: 'Invalid days' });
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const dateStr = cutoffDate.toISOString().replace('T', ' ').substring(0, 19);
+    
+    db.all("SELECT id, file_path, size FROM recordings WHERE created_at < ?", [dateStr], (err, rows) => {
+        if (err) return callback({ error: err.message });
+        
+        if (!rows || rows.length === 0) return callback({ deleted: 0, freedSpace: '0 MB' });
+
+        let deletedCount = 0;
+        let freedBytes = 0;
+        const fs = require('fs');
+
+        rows.forEach(row => {
+            const fullPath = path.join(__dirname, row.file_path);
+            if (fs.existsSync(fullPath)) {
+                try {
+                    fs.unlinkSync(fullPath);
+                } catch(e) { console.error('Delete file error:', e.message); }
+            }
+            deletedCount++;
+            freedBytes += row.size || 0;
+        });
+
+        db.run("DELETE FROM recordings WHERE created_at < ?", [dateStr], (delErr) => {
+            const freedMB = (freedBytes / 1024 / 1024).toFixed(2) + ' MB';
+            callback({ deleted: deletedCount, freedSpace: freedMB });
+        });
+    });
+}
+
+function telegramCleanupWrapper(type, param, callback) {
+    if (type === 'orphans') {
+        // Reuse existing logic but return stats
+        const fs = require('fs');
+        const baseDir = __dirname;
+
+        db.all('SELECT id, file_path FROM recordings', [], (err, rows) => {
+            if (err || !rows) return callback({ deleted: 0 });
+
+            let deleted = 0;
+            let pending = rows.length;
+            if (pending === 0) return callback({ deleted: 0 });
+
+            rows.forEach((row) => {
+                const fullPath = path.join(baseDir, row.file_path);
+                if (!fs.existsSync(fullPath)) {
+                    db.run('DELETE FROM recordings WHERE id = ?', [row.id], (delErr) => {
+                        if (!delErr) deleted++;
+                        if (--pending === 0) callback({ deleted });
+                    });
+                } else {
+                    if (--pending === 0) callback({ deleted });
+                }
+            });
+        });
+    } else if (type === 'old') {
+        telegramDeleteOldRecordings(param, callback);
+    }
+}
+
+function telegramUpdateAdminCredentials(username, password) {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const bcrypt = require('bcrypt');
+        
+        // Read current config
+        const configPath = path.join(__dirname, 'config.json');
+        const currentConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        
+        // Hash password
+        const saltRounds = 10;
+        const hashedPassword = bcrypt.hashSync(password, saltRounds);
+        
+        // Update config
+        currentConfig.auth = {
+            username: username,
+            password: hashedPassword
+        };
+        
+        // Write back to file
+        fs.writeFileSync(configPath, JSON.stringify(currentConfig, null, 4));
+        
+        // Update runtime config
+        config.auth = currentConfig.auth;
+        
+        return { success: true };
+    } catch (error) {
+        console.error('Failed to update admin credentials:', error);
+        return { success: false, error: error.message };
+    }
+}
