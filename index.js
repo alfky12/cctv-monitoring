@@ -166,25 +166,30 @@ console.log(`[Config] behind_https_proxy: ${behindProxy}`);
 // Shared session store to maintain data across dynamic middleware instances
 const sessionStore = new session.MemoryStore();
 
+// Initialize session middleware ONCE
+const sessionMiddleware = session({
+    secret: config.server.session_secret || 'cctv-monitoring-secret-key',
+    resave: false,
+    saveUninitialized: false,
+    store: sessionStore,
+    proxy: behindProxy,
+    cookie: {
+        // Apply 'secure' flag ONLY if the request is actually secure
+        // This allows local IP (HTTP) to work while keeping HTTPS secure
+        secure: behindProxy, 
+        maxAge: 24 * 60 * 60 * 1000,
+        sameSite: 'lax'
+    }
+});
+
 app.use((req, res, next) => {
     // Detect if the current request is secure (HTTPS or Cloudflare HTTPS)
     const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
-
-    // Initialize session middleware dynamically
-    session({
-        secret: config.server.session_secret || 'cctv-monitoring-secret-key',
-        resave: false,
-        saveUninitialized: false,
-        store: sessionStore,
-        proxy: behindProxy,
-        cookie: {
-            // Apply 'secure' flag ONLY if the request is actually secure
-            // This allows local IP (HTTP) to work while keeping HTTPS secure
-            secure: behindProxy ? isSecure : false,
-            maxAge: 24 * 60 * 60 * 1000,
-            sameSite: 'lax'
-        }
-    })(req, res, next);
+    
+    // Update cookie secure flag dynamically based on request if needed, 
+    // but usually setting it in config is enough. 
+    // Here we use the pre-initialized middleware.
+    sessionMiddleware(req, res, next);
 });
 
 // Debug middleware for session issues
@@ -465,7 +470,8 @@ async function updateSystemHealth() {
                 const inputItem = activePaths[inputPath];
                 const outputItem = activePaths[outputPath];
 
-                const currentlyOnline = !!((inputItem && inputItem.source) || (outputItem && outputItem.source));
+                // Use .ready property which indicates if the source is actually streaming
+                const currentlyOnline = !!((inputItem && inputItem.ready) || (outputItem && outputItem.ready));
 
                 const prevState = cameraStatus[cam.id] || { online: false };
 
@@ -552,7 +558,8 @@ async function registerCamera(cam) {
     // No transcoding needed - better quality and performance
     return mediaMtxRequest('POST', '/add/' + pathName, {
         name: pathName,
-        source: cam.url_rtsp
+        source: cam.url_rtsp,
+        sourceOnDemand: false
     });
 }
 
@@ -592,7 +599,10 @@ app.get('/archive', (req, res) => {
     `;
 
     db.all(query, [RECORDINGS_PAGE_LIMIT], (err, rows) => {
-        if (err) return console.error(err.message);
+        if (err) {
+            console.error(err.message);
+            return res.status(500).send("Database Error");
+        }
 
         // Also get cameras for filter dropdown if needed
         db.all("SELECT id, nama FROM cameras", [], (errCam, cams) => {
@@ -825,39 +835,68 @@ app.post('/api/settings/recording', requireApiAuth, (req, res) => {
     fs.writeFile(path.join(__dirname, 'config.json'), JSON.stringify(config, null, 4), (err) => {
         if (err) return res.status(500).json({ error: 'Failed save' });
         app.locals.recording = config.recording;
-        updateMediaMtxRecording(); // Apply immediately
-        res.json({ message: "Recording settings updated", recording: config.recording });
+        
+        // Apply recording path configs (record=true/false)
+        updateMediaMtxRecording(); 
+        
+        // Restart all cameras to apply transcoding settings (bitrate/resolution)
+        // This forces smart_transcode.sh to restart with new config
+        console.log('Reloading all cameras to apply new recording/transcoding settings...');
+        syncCameras();
+
+        res.json({ message: "Recording settings updated. Streams are restarting...", recording: config.recording });
     });
 });
 
 // System Status API
-app.get('/api/status', async (req, res) => {
-    // Check transcode status for each camera
-    let transcodeStatus = {};
-    try {
-        const pathsData = await mediaMtxRequest('GET', '/v3/paths/list');
-        const items = pathsData.items || [];
-        const activePathNames = Array.isArray(items) ? items.map(p => p.name) : Object.keys(items);
+app.get('/api/status', (req, res) => {
+    // Get all cameras to ensure we return status for everyone
+    db.all("SELECT id FROM cameras", [], async (err, rows) => {
+        let currentStatus = {};
+        
+        // If DB fails, fallback to what we have in memory
+        if (err || !rows) {
+            currentStatus = { ...cameraStatus };
+        } else {
+            // Build status for all known cameras
+            rows.forEach(cam => {
+                currentStatus[cam.id] = cameraStatus[cam.id] || { 
+                    online: false, 
+                    lastUpdate: null, 
+                    hasBeenChecked: false 
+                };
+            });
+        }
 
-        // Check which cameras have transcoded output streams
-        Object.keys(cameraStatus).forEach(id => {
-            const hasInput = activePathNames.includes(`cam_${id}_input`);
-            const hasTranscoded = activePathNames.includes(`cam_${id}`);
-            transcodeStatus[id] = {
-                input: hasInput,
-                transcoded: hasTranscoded,
-                mode: hasTranscoded ? 'transcoded' : (hasInput ? 'direct' : 'offline')
-            };
+        // Check transcode status for each camera
+        let transcodeStatus = {};
+        try {
+            const pathsData = await mediaMtxRequest('GET', '/v3/paths/list');
+            const items = pathsData.items || [];
+            // Handle both array (v1.9+) and object (older) formats
+            const activePathNames = Array.isArray(items) ? items.map(p => p.name) : Object.keys(items);
+
+            // Check which cameras have transcoded output streams
+            Object.keys(currentStatus).forEach(id => {
+                const hasInput = activePathNames.includes(`cam_${id}_input`);
+                const hasTranscoded = activePathNames.includes(`cam_${id}`);
+                transcodeStatus[id] = {
+                    input: hasInput,
+                    transcoded: hasTranscoded,
+                    mode: hasTranscoded ? 'transcoded' : (hasInput ? 'direct' : 'offline')
+                };
+            });
+        } catch (e) {
+            // Ignore errors from MediaMTX check, use empty transcode status
+            console.error('Status API MediaMTX check error:', e.message);
+        }
+
+        res.json({
+            cameras: currentStatus,
+            transcode: transcodeStatus,
+            disk: diskUsage,
+            serverTime: new Date()
         });
-    } catch (e) {
-        // Ignore errors
-    }
-
-    res.json({
-        cameras: cameraStatus,
-        transcode: transcodeStatus,
-        disk: diskUsage,
-        serverTime: new Date()
     });
 });
 
@@ -884,11 +923,12 @@ app.post('/api/settings/telegram', requireApiAuth, (req, res) => {
 
 // Update MediaMTX Settings
 app.post('/api/settings/mediamtx', requireApiAuth, (req, res) => {
-    const { host, api_port, hls_port, public_hls_url } = req.body;
+    const { host, api_port, rtsp_port, hls_port, public_hls_url } = req.body;
 
     config.mediamtx = {
         host: host || "127.0.0.1",
         api_port: parseInt(api_port) || 9123,
+        rtsp_port: parseInt(rtsp_port) || 8555,
         hls_port: parseInt(hls_port) || 8856,
         public_hls_url: public_hls_url || ""
     };
@@ -904,7 +944,8 @@ app.post('/api/settings/mediamtx', requireApiAuth, (req, res) => {
 
 // ONVIF Discovery API - find cameras on the local network
 app.post('/api/onvif/discover', requireApiAuth, (req, res) => {
-    const { timeout = 8000, username = '', password = '' } = req.body || {};
+    const defaultTimeout = config.onvif?.discovery_timeout || 8000;
+    const { timeout = defaultTimeout, username = '', password = '' } = req.body || {};
     const onvif = require('onvif');
 
     const results = [];
@@ -1343,6 +1384,80 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal Server Error' });
 });
 
+// --- System Update API ---
+app.get('/api/system/version', (req, res) => {
+    try {
+        const versionPath = path.join(__dirname, 'version.txt');
+        const fs = require('fs');
+        if (fs.existsSync(versionPath)) {
+            const version = fs.readFileSync(versionPath, 'utf8').trim();
+            res.json({ version: version });
+        } else {
+            res.json({ version: '1.0.0 (default)' });
+        }
+    } catch (e) {
+        res.json({ version: '1.0.0' });
+    }
+});
+
+
+app.post('/api/system/update', requireApiAuth, (req, res) => {
+    console.log('[System Update] Update requested from admin panel.');
+    const { exec } = require('child_process');
+
+    // Step 1: Git Pull
+    exec('git pull', (err, stdout, stderr) => {
+        if (err) {
+            console.error('[Update] Git pull failed:', err);
+            sendTelegramMessage(`❌ <b>Update aplikasi gagal</b>\nLangkah: git pull\nError: ${err.message}`);
+            return res.status(500).json({
+                success: false,
+                message: 'Gagal melakukan git pull. Pastikan Git terpasang dan remote repository tersedia.',
+                error: err.message,
+                stderr: stderr
+            });
+        }
+
+        console.log('[Update] Git pull success:', stdout);
+        sendTelegramMessage('⬇️ <b>Update aplikasi dimulai</b>\nGit pull berhasil. Melanjutkan npm install dan restart (jika Linux).');
+
+        // Respond to user immediately so they see success before server goes down
+        res.json({
+            success: true,
+            message: 'Git pull berhasil. Kode terbaru telah diunduh.',
+            output: stdout
+        });
+
+        // Step 2 & 3: NPM Install and Restart in background
+        // We use a delay to allow the response to reach the client
+        setTimeout(() => {
+            console.log('[Update] Starting npm install and restart sequence...');
+
+            exec('npm install --omit=dev', (npmerr) => {
+                if (npmerr) {
+                    console.error('[Update] NPM install failed:', npmerr);
+                    sendTelegramMessage(`❌ <b>Update aplikasi gagal</b>\nLangkah: npm install --omit=dev\nError: ${npmerr.message}`);
+                } else {
+                    console.log('[Update] NPM install success');
+                    sendTelegramMessage('✅ <b>Update aplikasi: npm install selesai</b>');
+                }
+
+                if (process.platform === 'linux') {
+                    console.log('[Update] Linux detected. Triggering systemctl restart...');
+                    exec('sudo systemctl restart mediamtx cctv-web', (restarterr) => {
+                        if (restarterr) {
+                            console.error('[Update] Restart command failed:', restarterr);
+                            sendTelegramMessage(`⚠️ <b>Update aplikasi: restart gagal</b>\nPeriksa service mediamtx dan cctv-web.\nError: ${restarterr.message}`);
+                        } else {
+                            sendTelegramMessage('🚀 <b>Update aplikasi selesai</b>\nService mediamtx dan cctv-web sudah direstart.');
+                        }
+                    });
+                }
+            });
+        }, 3000);
+    });
+});
+
 // 404 Handler
 app.use((req, res) => {
     res.status(404).json({ error: 'Not Found' });
@@ -1371,66 +1486,86 @@ function scanExistingRecordings() {
 
     console.log('Scanning existing recordings...');
 
-    // Get all camera folders
-    const cameraFolders = fs.readdirSync(recordingsDir).filter(f => {
-        const fullPath = path.join(recordingsDir, f);
-        return fs.statSync(fullPath).isDirectory() && f.startsWith('cam_');
-    });
-
-    let importedCount = 0;
-
-    cameraFolders.forEach(folder => {
-        // Extract camera ID from folder name (cam_1_input or cam_1)
-        const match = folder.match(/^cam_(\d+)(?:_input)?$/);
-        if (!match) return;
-
-        const cameraId = match[1];
-        const folderPath = path.join(recordingsDir, folder);
-
-        // Get all recording files in this folder
-        const files = fs.readdirSync(folderPath).filter(f => {
-            return f.endsWith('.mp4') || f.endsWith('.ts');
-        });
-
-        files.forEach(filename => {
-            const filePath = path.join(folderPath, filename);
-            const relativePath = path.relative(__dirname, filePath).replace(/\\/g, '/');
-
-            // Check if already in database
-            db.get('SELECT id FROM recordings WHERE file_path = ?', [relativePath], (err, row) => {
-                if (err) {
-                    console.error('Database error:', err.message);
-                    return;
-                }
-
-                if (!row) {
-                    // Not in database, import it
-                    const stats = fs.statSync(filePath);
-                    const size = stats.size;
-
-                    db.run(`INSERT INTO recordings (camera_id, filename, file_path, size) VALUES (?, ?, ?, ?)`,
-                        [cameraId, filename, relativePath, size],
-                        (err) => {
-                            if (err) {
-                                console.error(`Failed to import ${filename}:`, err.message);
-                            } else {
-                                importedCount++;
-                                console.log(`Imported: ${filename} (Camera ${cameraId})`);
-                            }
-                        }
-                    );
-                }
-            });
-        });
-    });
-
-    setTimeout(() => {
-        if (importedCount > 0) {
-            console.log(`✅ Imported ${importedCount} existing recording(s) to database`);
-        } else {
-            console.log('✅ All recordings already in database');
+    // 1. Get all known files from DB to avoid N+1 queries
+    db.all('SELECT file_path FROM recordings', [], (err, rows) => {
+        if (err) {
+            console.error('Database error during scan:', err.message);
+            return;
         }
-    }, 2000);
+
+        const existingFiles = new Set(rows.map(r => r.file_path));
+        let importedCount = 0;
+        let totalFilesFound = 0;
+
+        // 2. Scan filesystem
+        try {
+            const cameraFolders = fs.readdirSync(recordingsDir).filter(f => {
+                const fullPath = path.join(recordingsDir, f);
+                return fs.statSync(fullPath).isDirectory() && f.startsWith('cam_');
+            });
+
+            // Prepare statements for batch insertion
+            const stmt = db.prepare('INSERT INTO recordings (camera_id, filename, file_path, size, created_at) VALUES (?, ?, ?, ?, ?)');
+
+            db.serialize(() => {
+                db.run('BEGIN TRANSACTION');
+
+                cameraFolders.forEach(folder => {
+                    const match = folder.match(/^cam_(\d+)(?:_input)?$/);
+                    if (!match) return;
+
+                    const cameraId = match[1];
+                    const folderPath = path.join(recordingsDir, folder);
+
+                    try {
+                        const files = fs.readdirSync(folderPath).filter(f => {
+                            return f.endsWith('.mp4') || f.endsWith('.ts') || f.endsWith('.mkv');
+                        });
+
+                        files.forEach(filename => {
+                            const filePath = path.join(folderPath, filename);
+                            const relativePath = path.relative(__dirname, filePath).replace(/\\/g, '/');
+                            
+                            totalFilesFound++;
+
+                            if (!existingFiles.has(relativePath)) {
+                                try {
+                                    const stats = fs.statSync(filePath);
+                                    const size = stats.size;
+                                    // Format Date to SQLite format: YYYY-MM-DD HH:MM:SS
+                                    const mtime = stats.mtime;
+                                    const createdAt = mtime.toISOString().replace('T', ' ').substring(0, 19);
+
+                                    stmt.run(cameraId, filename, relativePath, size, createdAt, (err) => {
+                                        if (err) console.error(`Failed to import ${filename}:`, err.message);
+                                        else importedCount++;
+                                    });
+                                } catch (e) {
+                                    console.error(`Error processing file ${filename}:`, e.message);
+                                }
+                            }
+                        });
+                    } catch (e) {
+                        console.error(`Error reading folder ${folder}:`, e.message);
+                    }
+                });
+
+                db.run('COMMIT', (err) => {
+                    if (err) console.error('Transaction commit failed:', err.message);
+                    stmt.finalize();
+                    
+                    if (importedCount > 0) {
+                        console.log(`✅ Imported ${importedCount} new recording(s) to database (Total found: ${totalFilesFound})`);
+                    } else {
+                        console.log(`✅ Database is up to date (Scanned ${totalFilesFound} files)`);
+                    }
+                });
+            });
+
+        } catch (e) {
+            console.error('Scan error:', e.message);
+        }
+    });
 }
 
 // --- System Update API ---

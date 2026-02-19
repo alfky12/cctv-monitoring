@@ -1,9 +1,12 @@
 // Tools untuk update RTSP URL di database setelah reset
 const sqlite3 = require('sqlite3').verbose();
 
+const path = require('path');
+const dbPath = path.resolve(__dirname, 'cameras.db');
+
 // Fungsi update RTSP URL
 function updateRTSPUrl(cameraName, newRTSPUrl) {
-    const db = new sqlite3.Database('cameras.db');
+    const db = new sqlite3.Database(dbPath);
     
     return new Promise((resolve, reject) => {
         db.run(

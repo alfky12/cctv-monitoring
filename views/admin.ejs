@@ -1668,6 +1668,11 @@
             const statusMsg = document.getElementById('update-status-msg');
             const updateBtn = document.getElementById('updateAppBtn');
 
+            if (!remoteEl || !statusMsg || !updateBtn) {
+                console.error('Error: DOM elements not found');
+                return;
+            }
+
             remoteEl.textContent = 'Mengecek...';
             remoteEl.className = 'text-gray-500 animate-pulse';
             statusMsg.classList.add('hidden');
@@ -1675,6 +1680,7 @@
             try {
                 // Gunakan URL raw github yang sesuai dari config
                 const repoUrl = '<%= repository_url %>';
+                console.log('Repository URL:', repoUrl);
                 const GITHUB_RAW_VERSION_URL = `https://raw.githubusercontent.com/${repoUrl}/main/version.txt`;
 
                 console.log('Checking for updates at:', GITHUB_RAW_VERSION_URL);
@@ -1682,6 +1688,7 @@
                 if (!res.ok) throw new Error('Not found at ' + GITHUB_RAW_VERSION_URL);
 
                 const remoteVersion = (await res.text()).trim();
+                console.log('Remote version:', remoteVersion, 'Local version:', localVersion);
                 remoteEl.textContent = remoteVersion;
                 remoteEl.classList.remove('animate-pulse');
 
@@ -1699,8 +1706,12 @@
                     updateBtn.classList.remove('animate-bounce');
                 }
             } catch (err) {
+                console.error('Check update error:', err);
                 remoteEl.textContent = 'Gagal Cek';
                 remoteEl.className = 'text-red-400 font-mono text-lg';
+                statusMsg.textContent = 'Error: ' + err.message;
+                statusMsg.className = 'text-xs text-center py-1 px-4 rounded bg-red-900/30 text-red-400 block';
+                statusMsg.classList.remove('hidden');
             }
         }
 
@@ -1715,6 +1726,12 @@
             const spin = document.getElementById('updateBtnSpin');
             const output = document.getElementById('updateOutput');
 
+            if (!btn || !text || !spin || !output) {
+                console.error('Error: DOM elements not found');
+                alert('Error: Element UI tidak ditemukan. Silakan refresh halaman.');
+                return;
+            }
+
             btn.disabled = true;
             text.textContent = 'Sedang Mengupdate...';
             spin.classList.remove('hidden');
@@ -1723,8 +1740,17 @@
             btn.classList.remove('animate-bounce');
 
             try {
+                console.log('Sending update request to API...');
                 const res = await fetch('/api/system/update', { method: 'POST' });
+                console.log('Response status:', res.status);
+
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.message || errorData.error || 'Update failed');
+                }
+
                 const data = await res.json();
+                console.log('Update response:', data);
 
                 spin.classList.add('hidden');
                 output.classList.remove('hidden');
@@ -1745,10 +1771,17 @@
                     btn.disabled = false;
                 }
             } catch (err) {
-                alert('Terjadi kesalahan koneksi saat mencoba update.');
-                btn.disabled = false;
-                text.textContent = 'Cek & Update Sekarang';
-                spin.classList.add('hidden');
+                console.error('Update error:', err);
+                alert('Terjadi kesalahan: ' + err.message);
+                if (output) {
+                    output.classList.remove('hidden');
+                    output.textContent = 'ERROR:\n' + err.message;
+                }
+                if (btn) {
+                    btn.disabled = false;
+                    text.textContent = 'Cek & Update Sekarang';
+                    spin.classList.add('hidden');
+                }
             }
         }
     </script>

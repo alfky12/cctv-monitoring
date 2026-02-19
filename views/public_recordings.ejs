@@ -236,7 +236,7 @@
                         <tbody class="divide-y divide-gray-700" id="recordingsBody">
                             <% recordings.forEach(function(rec) { %>
                                 <tr class="table-row-hover transition duration-150 recording-row"
-                                    data-camera="<%= rec.camera_name %>" data-time="<%= rec.created_at %>"
+                                    data-camera="<%= rec.camera_name %>" data-time="<%= rec.created_at %><%= rec.created_at.includes('Z') ? '' : 'Z' %>"
                                     data-file="/<%= rec.file_path %>">
                                     <td class="p-4 font-medium text-white">
                                         <%= rec.camera_name %>
@@ -249,7 +249,7 @@
                                         </video>
                                     </td>
                                     <td class="p-4 text-gray-300">
-                                        <%= new Date(rec.created_at).toLocaleString('id-ID') %>
+                                        <%= new Date(rec.created_at + (rec.created_at.includes('Z') ? '' : 'Z')).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'medium' }) %>
                                     </td>
                                     <td class="p-4 text-gray-400 text-sm">
                                         <%= rec.duration ? rec.duration + 's' : '-' %>
@@ -268,15 +268,6 @@
                                                 </path>
                                             </svg>
                                         </button>
-                                        <a href="/<%= rec.file_path %>" download
-                                            class="bg-green-600 hover:bg-green-700 text-white p-2 rounded transition"
-                                            title="Download">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4">
-                                                </path>
-                                            </svg>
-                                        </a>
                                     </td>
                                 </tr>
                                 <% }); %>
@@ -341,11 +332,7 @@
                     </svg>
                     <p class="text-white font-semibold mb-2">Gagal Memutar Video</p>
                     <p class="text-gray-400 text-sm mb-4">Codec video mungkin tidak didukung oleh browser Anda (H.265).
-                        Silakan download video untuk diputar di aplikasi lokal.</p>
-                    <a id="error-download-link" href="#" download
-                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm transition">
-                        Download Video
-                    </a>
+                        Hubungi admin untuk akses video ini.</p>
                 </div>
             </div>
             <!-- Timeline in Modal -->
@@ -463,7 +450,7 @@
             // Tooltip
             const tooltip = document.createElement('div');
             tooltip.className = 'timeline-tooltip';
-            tooltip.innerHTML = `<strong>${recording.camera_name}</strong><br>${recTime.toLocaleTimeString('id-ID')}`;
+            tooltip.innerHTML = `<strong>${recording.camera_name}</strong><br>${recTime.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })}`;
             segment.appendChild(tooltip);
 
             segment.onclick = (e) => {

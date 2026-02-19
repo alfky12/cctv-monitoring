@@ -421,10 +421,14 @@
                             const text = document.getElementById(`status-text-${id}`);
 
                             if (dot && text) {
-                                if (status.online) {
+                                // Default to offline if status is undefined/null
+                                const isOnline = status && status.online;
+                                const isTranscoded = data.transcode && data.transcode[id] && data.transcode[id].transcoded;
+
+                                if (isOnline) {
                                     dot.classList.remove('bg-gray-600', 'bg-red-500', 'bg-purple-500');
-                                    const tc = data.transcode && data.transcode[id];
-                                    if (tc && tc.transcoded) {
+                                    
+                                    if (isTranscoded) {
                                         dot.classList.add('bg-purple-500', 'animate-pulse');
                                         text.innerText = 'H.264';
                                         text.classList.remove('text-gray-500', 'text-red-500', 'text-green-500');
