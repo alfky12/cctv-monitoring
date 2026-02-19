@@ -26,7 +26,7 @@
     },
     "recording": {
         "enabled": false,
-        "start_time": "06:00",
+        "start_time": "00:00",
         "end_time": "23:59",
         "segment_duration": "60m",
         "delete_after": "7d",

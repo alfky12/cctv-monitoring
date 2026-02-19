@@ -530,7 +530,11 @@
                     <!-- Presets Section -->
                     <div class="mb-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
                         <label class="block text-sm font-medium text-gray-300 mb-2">Pilih Preset (Opsional)</label>
-                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+                            <button type="button" onclick="applyPreset('24h')"
+                                class="px-3 py-2 bg-orange-600 hover:bg-orange-700 rounded text-sm text-white transition font-bold shadow-lg transform hover:scale-105">
+                                24 Jam<br><span class="text-xs text-gray-200">Rekaman Nonstop</span>
+                            </button>
                             <button type="button" onclick="applyPreset('ultra-compact')"
                                 class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-300 transition">
                                 Ultra Compact<br><span class="text-xs text-gray-500">~50 MB/jam</span>
@@ -1087,18 +1091,24 @@
 
         // Apply preset function
         function applyPreset(presetName) {
+            const form = document.getElementById('recordingSettingsForm');
+            if (!form) return;
+
+            if (presetName === '24h') {
+                form.start_time.value = '00:00';
+                form.end_time.value = '23:59';
+                return;
+            }
+
             const preset = presets[presetName];
             if (!preset) return;
 
-            const form = document.getElementById('recordingSettingsForm');
-            if (form) {
-                form.video_codec.value = preset.video_codec;
-                form.resolution.value = preset.resolution;
-                form.frame_rate.value = preset.frame_rate;
-                form.bitrate.value = preset.bitrate;
-                form.audio_enabled.value = preset.audio_enabled;
-                updateStorageEstimate();
-            }
+            form.video_codec.value = preset.video_codec;
+            form.resolution.value = preset.resolution;
+            form.frame_rate.value = preset.frame_rate;
+            form.bitrate.value = preset.bitrate;
+            form.audio_enabled.value = preset.audio_enabled;
+            updateStorageEstimate();
         }
 
         // Storage estimation function

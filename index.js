@@ -548,21 +548,36 @@ function checkTimeWindow(startStr, endStr) {
 }
 
 async function registerCamera(cam) {
-    const pathName = `cam_${cam.id}_input`;
+    const inputPath = `cam_${cam.id}_input`;
+    const outputPath = `cam_${cam.id}`;
 
     console.log(`Registering camera ${cam.id} (${cam.nama}) to MediaMTX...`);
 
-    // Always delete first to ensure a fresh registration if URL changed
-    await mediaMtxRequest('DELETE', '/delete/' + pathName);
-
-    // Since we use HLS fMP4 variant, H265/HEVC is natively supported
-    // No transcoding needed - better quality and performance
-    return mediaMtxRequest('POST', '/add/' + pathName, {
-        name: pathName,
+    // 1. Register Input Path (RTSP Source)
+    await mediaMtxRequest('DELETE', '/delete/' + inputPath);
+    await mediaMtxRequest('POST', '/add/' + inputPath, {
+        name: inputPath,
         source: cam.url_rtsp,
         sourceOnDemand: false,
         rtspTransport: 'tcp',
         sourceProtocol: 'tcp'
+    });
+
+    // 2. Register Output Path (Transcoded/Recording)
+    // We must register this explicitly so we can apply recording settings
+    const rec = config.recording || {};
+    const isInsideWindow = checkTimeWindow(rec.start_time, rec.end_time);
+    const shouldRecord = (rec.enabled && isInsideWindow);
+
+    console.log(`Configuring output path ${outputPath} (Record: ${shouldRecord})`);
+
+    await mediaMtxRequest('DELETE', '/delete/' + outputPath);
+    return mediaMtxRequest('POST', '/add/' + outputPath, {
+        name: outputPath,
+        // source defaults to 'publisher' which is what we want (ffmpeg publishes here)
+        record: shouldRecord,
+        recordSegmentDuration: rec.segment_duration || '60m',
+        recordDeleteAfter: rec.delete_after || '7d'
     });
 }
 
