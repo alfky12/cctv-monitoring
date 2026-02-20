@@ -12,31 +12,35 @@
     "mediamtx": {
         "host": "127.0.0.1",
         "api_port": 9123,
+        "rtsp_port": 8555,
         "hls_port": 8856,
-        "public_hls_url": "https://stream.alijaya.com"
+        "public_hls_url": ""
+    },
+    "onvif": {
+        "discovery_timeout": 8000
     },
     "site": {
         "title": "CCTV Monitor",
-        "footer": "Monitoring System by ALIJAYA-NET",
-        "running_text": "Selamat Datang di CCTV Monitoring Publik Untuk donasi silahkan ke ewallet 081947215703"
+        "footer": "App by ALIJAYA-NET donate eWallet 081947215703",
+        "running_text": "Marhaban Ya Ramadhan...... Selamat menunaikan Ibadah Puasa"
     },
     "recording": {
         "enabled": true,
         "start_time": "00:00",
         "end_time": "23:59",
         "segment_duration": "60m",
-        "delete_after": "7d",
+        "delete_after": "30d",
         "video_codec": "h264",
-        "resolution": "720p",
-        "frame_rate": 12,
-        "bitrate": "800k",
+        "resolution": "1080p",
+        "frame_rate": "10",
+        "bitrate": "1200k",
         "max_bitrate": "900k",
-        "audio_enabled": true,
+        "audio_enabled": "true",
         "audio_bitrate": "64k"
     },
     "telegram": {
-        "enabled": false,
-        "bot_token": "",
-        "chat_id": ""
+        "enabled": true,
+        "bot_token": "2002517639:AAG1Bo1dvP-5GEHWoUCY7sDSbmqNCqWclKc",
+        "chat_id": "567858628"
     }
 }

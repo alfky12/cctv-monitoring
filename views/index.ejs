@@ -282,7 +282,6 @@
                                 var video = document.getElementById('video-<%= camera.id %>');
                                 var overlay = document.getElementById('cam-overlay-<%= camera.id %>');
                                 var overlayText = document.getElementById('cam-overlay-text-<%= camera.id %>');
-                                // Priority: public_hls_url > dynamic local URL
                                 var baseUrl = '<%= mediamtx.public_hls_url %>' || (window.location.protocol + '//' + window.location.hostname + ':<%= hls_port %>');
 
                                 // Try transcoded stream first (H.264), fallback to raw input
@@ -297,6 +296,17 @@
                                     if (!overlay) return;
                                     if (message && overlayText) {
                                         overlayText.innerText = message;
+                                    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                                        if (connectTimeout) {
+                                            clearTimeout(connectTimeout);
+                                            connectTimeout = null;
+                                        }
+                                        setOverlay(true, 'Menghubungkan ke stream...');
+                                        video.src = fallbackSrc;
+                                        video.addEventListener('loadedmetadata', function () {
+                                            setOverlay(false);
+                                            video.play();
+                                        });
                                     }
                                     if (visible) {
                                         overlay.classList.remove('opacity-0');
@@ -375,17 +385,6 @@
                                                 }
                                             }
                                         });
-                                    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                                        if (connectTimeout) {
-                                            clearTimeout(connectTimeout);
-                                            connectTimeout = null;
-                                        }
-                                        setOverlay(true, 'Menghubungkan ke stream...');
-                                        video.src = fallbackSrc;
-                                        video.addEventListener('loadedmetadata', function () {
-                                            setOverlay(false);
-                                            video.play();
-                                        });
                                     }
                                 }
 
@@ -421,10 +420,14 @@
                             const text = document.getElementById(`status-text-${id}`);
 
                             if (dot && text) {
-                                if (status.online) {
+                                // Default to offline if status is undefined/null
+                                const isOnline = status && status.online;
+                                const isTranscoded = data.transcode && data.transcode[id] && data.transcode[id].transcoded;
+
+                                if (isOnline) {
                                     dot.classList.remove('bg-gray-600', 'bg-red-500', 'bg-purple-500');
-                                    const tc = data.transcode && data.transcode[id];
-                                    if (tc && tc.transcoded) {
+                                    
+                                    if (isTranscoded) {
                                         dot.classList.add('bg-purple-500', 'animate-pulse');
                                         text.innerText = 'H.264';
                                         text.classList.remove('text-gray-500', 'text-red-500', 'text-green-500');
@@ -659,6 +662,14 @@
                 }
 
                 function initMap() {
+                    // Fix Leaflet Default Icon Issue
+                    delete L.Icon.Default.prototype._getIconUrl;
+                    L.Icon.Default.mergeOptions({
+                        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+                        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+                    });
+
                     // Default center (Jakarta) or first camera location
                     let center = [-6.2088, 106.8456];
                     const validCam = camerasData.find(c => c.lat && c.lng);
@@ -699,8 +710,7 @@
                                 if (!video) return;
 
                                 // Use public_hls_url if configured, otherwise use current host
-                                const publicHlsUrl = '<%= mediamtx.public_hls_url %>';
-                                const baseUrl = publicHlsUrl || (window.location.protocol + '//' + window.location.hostname + ':' + hlsPort);
+                                const baseUrl = '<%= mediamtx.public_hls_url %>' || (window.location.protocol + '//' + window.location.hostname + ':' + hlsPort);
                                 const transcodedSrc = baseUrl + '/cam_' + cam.id + '/index.m3u8';
                                 const fallbackSrc = baseUrl + '/cam_' + cam.id + '_input/index.m3u8';
 

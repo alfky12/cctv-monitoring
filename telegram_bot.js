@@ -60,6 +60,21 @@ function init(config, database, serviceProvider) {
     }
 }
 
+function stop() {
+    if (bot) {
+        try {
+            bot.stopPolling();
+        } catch (e) {
+            console.error('[Telegram] stopPolling error:', e.message);
+        }
+        bot = null;
+    }
+}
+
+function restart(config, database, serviceProvider) {
+    stop();
+    init(config, database, serviceProvider);
+}
 /**
  * Send a message to the configured chat_id
  * @param {string} text - The message text (HTML supported)
@@ -429,5 +444,7 @@ function setupListeners() {
 
 module.exports = {
     init,
-    sendMessage
+    sendMessage,
+    stop,
+    restart
 };

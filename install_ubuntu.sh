@@ -17,7 +17,6 @@ fi
 echo "Updating system and installing dependencies..."
 sudo apt-get update -y || echo "Warning: apt update had some errors, continuing..."
 sudo apt-get install -y curl wget git ffmpeg build-essential sqlite3 ufw
-sudo timedatectl set-timezone Asia/Jakarta || true
 
 # --- 3. Install Node.js LTS (v20) ---
 if ! command -v node &> /dev/null; then
@@ -43,6 +42,7 @@ if [ ! -f "mediamtx" ]; then
     wget -O mediamtx.tar.gz "$DOWNLOAD_URL"
     tar -xvzf mediamtx.tar.gz mediamtx mediamtx.yml
     rm mediamtx.tar.gz
+    chmod +x mediamtx
 fi
 
 # --- 5. Create Supporting Scripts (Clean Bash Format) ---
@@ -61,15 +61,63 @@ if [[ "$MTX_PATH" != *"_input"* ]]; then
     exit 0
 fi
 
-SOURCE_RTSP="rtsp://127.0.0.1:8555/$MTX_PATH"
-TARGET_NAME="${MTX_PATH/_input/}"
-TARGET_RTSP="rtsp://127.0.0.1:8555/$TARGET_NAME"
+# Read recording settings from config.json with fallback values
+CONFIG_FILE="$SCRIPT_DIR/config.json"
 
-# Global tunable parameters to keep CPU usage low when many cameras are present
-VIDEO_BITRATE="800k"
-MAX_VIDEO_BITRATE="900k"
+# Helper function to parse JSON value (supports strings and numbers)
+get_config_value() {
+    local key="$1"
+    local default="$2"
+    if [ -f "$CONFIG_FILE" ]; then
+        # Try matching string value first: "key": "value"
+        local value=$(grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$CONFIG_FILE" | cut -d'"' -f4)
+        
+        # If empty, try matching number/boolean value: "key": 123 or "key": true
+        if [ -z "$value" ]; then
+            value=$(grep -o "\"$key\"[[:space:]]*:[[:space:]]*[^,}]*" "$CONFIG_FILE" | cut -d':' -f2 | tr -d ' "')
+        fi
+        
+        if [ -n "$value" ]; then
+            echo "$value"
+        else
+            echo "$default"
+        fi
+    else
+        echo "$default"
+    fi
+}
+
+# Get RTSP port from config or default to 8555
+RTSP_PORT=$(get_config_value "rtsp_port" "8555")
+if [ -z "$RTSP_PORT" ]; then
+    RTSP_PORT="8555"
+fi
+
+SOURCE_RTSP="rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH"
+TARGET_NAME="${MTX_PATH/_input/}"
+TARGET_RTSP="rtsp://127.0.0.1:$RTSP_PORT/$TARGET_NAME"
+
+VIDEO_CODEC_CONFIG=$(get_config_value "video_codec" "h264")
+RESOLUTION_CONFIG=$(get_config_value "resolution" "720p")
+VIDEO_BITRATE_CONFIG=$(get_config_value "bitrate" "800k")
+MAX_VIDEO_BITRATE_CONFIG=$(get_config_value "max_bitrate" "900k")
+VIDEO_FPS_CONFIG=$(get_config_value "frame_rate" "12")
+AUDIO_ENABLED_CONFIG=$(get_config_value "audio_enabled" "true")
+AUDIO_BITRATE_CONFIG=$(get_config_value "audio_bitrate" "64k")
+
+# Map resolution to FFmpeg resolution
+case "$RESOLUTION_CONFIG" in
+    "720p") RESOLUTION="1280:720" ;;
+    "1080p") RESOLUTION="1920:1080" ;;
+    "D1") RESOLUTION="720:480" ;;
+    *) RESOLUTION="1280:720" ;;
+esac
+
+# Global tunable parameters from config
+VIDEO_BITRATE="$VIDEO_BITRATE_CONFIG"
+MAX_VIDEO_BITRATE="$MAX_VIDEO_BITRATE_CONFIG"
 VIDEO_BUF_SIZE="1600k"
-VIDEO_FPS=12
+VIDEO_FPS="$VIDEO_FPS_CONFIG"
 GOP_SIZE=$((VIDEO_FPS * 2))
 ENC_THREADS=1
 
@@ -81,14 +129,32 @@ VIDEO_CODEC=$(
     "$SOURCE_RTSP" 2>/dev/null | head -n1 | tr -d '\r\n'
 )
 echo "[$(date)] Detected video codec: '$VIDEO_CODEC'" >> "$LOG_FILE"
+echo "[$(date)] Config codec: '$VIDEO_CODEC_CONFIG', Resolution: '$RESOLUTION_CONFIG', FPS: $VIDEO_FPS, Bitrate: $VIDEO_BITRATE" >> "$LOG_FILE"
 
-echo "[$(date)] Transcoding $MTX_PATH to H.264/yuv420p + AAC with ${VIDEO_BITRATE}@${VIDEO_FPS}fps..." >> "$LOG_FILE"
-ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i "$SOURCE_RTSP" \
-  -c:v libx264 -preset ultrafast -tune zerolatency -profile:v main -level 4.0 \
-  -pix_fmt yuv420p -b:v "$VIDEO_BITRATE" -maxrate "$MAX_VIDEO_BITRATE" -bufsize "$VIDEO_BUF_SIZE" \
-  -r "$VIDEO_FPS" -g "$GOP_SIZE" -threads "$ENC_THREADS" \
-  -c:a aac -ac 1 -ar 44100 -b:a 64k \
-  -f rtsp -rtsp_transport tcp "$TARGET_RTSP" >> "$LOG_FILE" 2>&1
+# Build FFmpeg command
+FFMPEG_CMD="ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i \"$SOURCE_RTSP\""
+
+# Video codec
+if [ "$VIDEO_CODEC_CONFIG" = "h265" ] || [ "$VIDEO_CODEC_CONFIG" = "hevc" ]; then
+    FFMPEG_CMD="$FFMPEG_CMD -c:v libx265 -preset ultrafast -tune zerolatency -profile:v main"
+else
+    FFMPEG_CMD="$FFMPEG_CMD -c:v libx264 -preset ultrafast -tune zerolatency -profile:v main -level 4.0 -pix_fmt yuv420p"
+fi
+
+# Video settings
+FFMPEG_CMD="$FFMPEG_CMD -s \"$RESOLUTION\" -b:v \"$VIDEO_BITRATE\" -maxrate \"$MAX_VIDEO_BITRATE\" -bufsize \"$VIDEO_BUF_SIZE\""
+FFMPEG_CMD="$FFMPEG_CMD -r \"$VIDEO_FPS\" -g \"$GOP_SIZE\" -threads \"$ENC_THREADS\""
+
+# Audio settings
+if [ "$AUDIO_ENABLED_CONFIG" = "true" ]; then
+    FFMPEG_CMD="$FFMPEG_CMD -c:a aac -ac 1 -ar 44100 -b:a \"$AUDIO_BITRATE_CONFIG\""
+fi
+
+# Output
+FFMPEG_CMD="$FFMPEG_CMD -f rtsp -rtsp_transport tcp \"$TARGET_RTSP\""
+
+echo "[$(date)] Transcoding $MTX_PATH with codec: $VIDEO_CODEC_CONFIG, resolution: $RESOLUTION, fps: $VIDEO_FPS, bitrate: $VIDEO_BITRATE..." >> "$LOG_FILE"
+eval $FFMPEG_CMD >> "$LOG_FILE" 2>&1
 EOF
 
 cat << 'EOF' > record_notify.sh
@@ -104,6 +170,12 @@ echo "Patching mediamtx.yml..."
 cp mediamtx.yml mediamtx.yml.bak
 sed -i 's/rtspAddress: :8554/rtspAddress: :8555/g' mediamtx.yml
 sed -i 's/hlsAddress: :8888/hlsAddress: :8856/g' mediamtx.yml
+sed -i 's/rtpAddress: :8000/rtpAddress: :8050/g' mediamtx.yml
+sed -i 's/rtcpAddress: :8001/rtcpAddress: :8051/g' mediamtx.yml
+sed -i 's/rtmpAddress: :1935/rtmpAddress: :1936/g' mediamtx.yml
+sed -i 's/webrtcAddress: :8889/webrtcAddress: :8890/g' mediamtx.yml
+sed -i 's/webrtcICEUDPMuxAddress: :8189/webrtcICEUDPMuxAddress: ""/g' mediamtx.yml
+sed -i 's/apiAddress: :[0-9]\+/apiAddress: :9123/g' mediamtx.yml
 sed -i 's/apiAddress: :[0-9]\+/apiAddress: :9123/g' mediamtx.yml
 sed -i 's/^api: .*/api: yes/g' mediamtx.yml
 # Set HLS to fMP4 for H265 support

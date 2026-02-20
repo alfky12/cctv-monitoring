@@ -67,35 +67,15 @@ if ps -p $PID > /dev/null; then
     # 5. Restart Service
     echo "🔄 Restarting systemd service..."
     
-    # Buat ulang config bersih dengan port yang sudah diverifikasi aman
-    echo "🔧 Membuat ulang konfigurasi MediaMTX (clean config)..."
-    cat <<EOF > mediamtx.yml
-paths:
-  all:
-    source: publisher
-
-# RTSP
-rtsp: yes
-rtspTransports: [tcp]
-rtspAddress: :8555
-rtpAddress: :8100
-rtcpAddress: :8101
-
-# RTMP
-rtmpAddress: :1936
-
-# HLS
-hlsAddress: :8856
-hlsVariant: fmp4
-
-# WebRTC
-webrtcAddress: :8890
-webrtcLocalUDPAddress: :8190
-
-# API
-api: yes
-apiAddress: :9123
-EOF
+    # Apply port fix if config exists
+    if [ -f "mediamtx.yml" ]; then
+        echo "🔧 Patching UDP ports (8000->8050), RTMP (1935->1936), WebRTC (8889->8890), disabling UDP Mux..."
+        sed -i 's/rtpAddress: :8000/rtpAddress: :8050/g' mediamtx.yml
+        sed -i 's/rtcpAddress: :8001/rtcpAddress: :8051/g' mediamtx.yml
+        sed -i 's/rtmpAddress: :1935/rtmpAddress: :1936/g' mediamtx.yml
+        sed -i 's/webrtcAddress: :8889/webrtcAddress: :8890/g' mediamtx.yml
+        sed -i 's/webrtcICEUDPMuxAddress: :8189/webrtcICEUDPMuxAddress: ""/g' mediamtx.yml
+    fi
 
     sudo systemctl restart mediamtx
     sleep 2

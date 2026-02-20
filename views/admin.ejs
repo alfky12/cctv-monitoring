@@ -472,28 +472,7 @@
                         </svg>
                         Konfigurasi MediaMTX
                     </h2>
-                    <form id="mediamtxSettingsForm" class="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
-                        <div class="col-span-1">
-                            <label class="block text-sm font-medium text-gray-400 mb-1">Host (IP Address)</label>
-                            <input type="text" name="host"
-                                value="<%= (locals.mediamtx && mediamtx.host) || '127.0.0.1' %>"
-                                class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-green-500 placeholder-gray-600"
-                                placeholder="127.0.0.1 atau auto">
-                        </div>
-                        <div class="col-span-1">
-                            <label class="block text-sm font-medium text-gray-400 mb-1">API Port</label>
-                            <input type="number" name="api_port"
-                                value="<%= (locals.mediamtx && mediamtx.api_port) || 9123 %>"
-                                class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-green-500"
-                                placeholder="9123">
-                        </div>
-                        <div class="col-span-1">
-                            <label class="block text-sm font-medium text-gray-400 mb-1">HLS Port</label>
-                            <input type="number" name="hls_port"
-                                value="<%= (locals.mediamtx && mediamtx.hls_port) || 8856 %>"
-                                class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-green-500"
-                                placeholder="8856">
-                        </div>
+                    <form id="mediamtxSettingsForm" class="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
                         <div class="col-span-1 md:col-span-2">
                             <label class="block text-sm font-medium text-gray-400 mb-1">Public HLS URL (Opsional /
                                 Cloudflare)</label>
@@ -511,8 +490,7 @@
                             </button>
                         </div>
                     </form>
-                    <p class="text-xs text-gray-500 mt-2 italic">* Gunakan 'auto' untuk deteksi otomatis atau
-                        '127.0.0.1' jika berjalan lokal.</p>
+                    <p class="text-xs text-gray-500 mt-2 italic">* Pengaturan internal (Host & Port) dikonfigurasi otomatis.</p>
                 </div>
 
                 <!-- Recording Schedule Section -->
@@ -715,6 +693,14 @@
                             </button>
                         </div>
                     </form>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-3">
+                        <div class="col-span-1">
+                            <button id="restartTelegramBtn" type="button"
+                                class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded shadow-lg transition transform active:scale-95">
+                                Aktifkan/Restart Bot
+                            </button>
+                        </div>
+                    </div>
                     <p class="text-xs text-gray-500 mt-2 italic">* Token dan Chat ID bisa didapatkan melalui @BotFather
                         dan @userinfobot.</p>
                 </div>
@@ -818,13 +804,11 @@
                             Streaming</h3>
                         <div class="space-y-3">
                             <div class="flex items-center justify-between bg-gray-900 p-2 rounded">
-                                <span class="text-sm text-gray-300">MediaMTX API (<%= (locals.mediamtx &&
-                                        mediamtx.api_port) || 9123 %>)</span>
+                                <span class="text-sm text-gray-300">MediaMTX API</span>
                                 <span class="w-3 h-3 rounded-full bg-green-500 animate-pulse"></span>
                             </div>
                             <div class="flex items-center justify-between bg-gray-900 p-2 rounded">
-                                <span class="text-sm text-gray-300">HLS Streamer (<%= (locals.mediamtx &&
-                                        mediamtx.hls_port) || 8856 %>)</span>
+                                <span class="text-sm text-gray-300">HLS Streamer</span>
                                 <span class="w-3 h-3 rounded-full bg-blue-500"></span>
                             </div>
                         </div>
@@ -1181,6 +1165,20 @@
             }
         });
 
+        document.getElementById('restartTelegramBtn')?.addEventListener('click', async () => {
+            try {
+                const resp = await fetch('/api/telegram/restart', { method: 'POST' });
+                if (resp.ok) {
+                    alert('Bot Telegram berhasil diaktifkan/direstart');
+                } else {
+                    alert('Gagal mengaktifkan/direstart bot');
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Terjadi kesalahan koneksi');
+            }
+        });
+
         document.getElementById('mediamtxSettingsForm')?.addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(e.target);
@@ -1428,6 +1426,14 @@
         let pickerMap = null;
         let pickerMarker = null;
 
+        // Fix Leaflet Default Icon Issue
+        delete L.Icon.Default.prototype._getIconUrl;
+        L.Icon.Default.mergeOptions({
+            iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+            iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+        });
+
         function initPickerMap() {
             if (pickerMap) return;
 
@@ -1668,6 +1674,11 @@
             const statusMsg = document.getElementById('update-status-msg');
             const updateBtn = document.getElementById('updateAppBtn');
 
+            if (!remoteEl || !statusMsg || !updateBtn) {
+                console.error('Error: DOM elements not found');
+                return;
+            }
+
             remoteEl.textContent = 'Mengecek...';
             remoteEl.className = 'text-gray-500 animate-pulse';
             statusMsg.classList.add('hidden');
@@ -1675,6 +1686,7 @@
             try {
                 // Gunakan URL raw github yang sesuai dari config
                 const repoUrl = '<%= repository_url %>';
+                console.log('Repository URL:', repoUrl);
                 const GITHUB_RAW_VERSION_URL = `https://raw.githubusercontent.com/${repoUrl}/main/version.txt`;
 
                 console.log('Checking for updates at:', GITHUB_RAW_VERSION_URL);
@@ -1682,6 +1694,7 @@
                 if (!res.ok) throw new Error('Not found at ' + GITHUB_RAW_VERSION_URL);
 
                 const remoteVersion = (await res.text()).trim();
+                console.log('Remote version:', remoteVersion, 'Local version:', localVersion);
                 remoteEl.textContent = remoteVersion;
                 remoteEl.classList.remove('animate-pulse');
 
@@ -1699,8 +1712,12 @@
                     updateBtn.classList.remove('animate-bounce');
                 }
             } catch (err) {
+                console.error('Check update error:', err);
                 remoteEl.textContent = 'Gagal Cek';
                 remoteEl.className = 'text-red-400 font-mono text-lg';
+                statusMsg.textContent = 'Error: ' + err.message;
+                statusMsg.className = 'text-xs text-center py-1 px-4 rounded bg-red-900/30 text-red-400 block';
+                statusMsg.classList.remove('hidden');
             }
         }
 
@@ -1715,6 +1732,12 @@
             const spin = document.getElementById('updateBtnSpin');
             const output = document.getElementById('updateOutput');
 
+            if (!btn || !text || !spin || !output) {
+                console.error('Error: DOM elements not found');
+                alert('Error: Element UI tidak ditemukan. Silakan refresh halaman.');
+                return;
+            }
+
             btn.disabled = true;
             text.textContent = 'Sedang Mengupdate...';
             spin.classList.remove('hidden');
@@ -1723,8 +1746,17 @@
             btn.classList.remove('animate-bounce');
 
             try {
+                console.log('Sending update request to API...');
                 const res = await fetch('/api/system/update', { method: 'POST' });
+                console.log('Response status:', res.status);
+
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.message || errorData.error || 'Update failed');
+                }
+
                 const data = await res.json();
+                console.log('Update response:', data);
 
                 spin.classList.add('hidden');
                 output.classList.remove('hidden');
@@ -1745,10 +1777,17 @@
                     btn.disabled = false;
                 }
             } catch (err) {
-                alert('Terjadi kesalahan koneksi saat mencoba update.');
-                btn.disabled = false;
-                text.textContent = 'Cek & Update Sekarang';
-                spin.classList.add('hidden');
+                console.error('Update error:', err);
+                alert('Terjadi kesalahan: ' + err.message);
+                if (output) {
+                    output.classList.remove('hidden');
+                    output.textContent = 'ERROR:\n' + err.message;
+                }
+                if (btn) {
+                    btn.disabled = false;
+                    text.textContent = 'Cek & Update Sekarang';
+                    spin.classList.add('hidden');
+                }
             }
         }
     </script>
