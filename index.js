@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const db = require('./database');
 const http = require('http');
+const https = require('https');
 const session = require('express-session');
 const config = require('./config.json');
 const telegramBot = require('./telegram_bot');
@@ -22,12 +23,84 @@ if (config.server.behind_https_proxy) {
 }
 
 // Helper to get effective MediaMTX Host
-function getEffectiveMediaMtxHost() {
-    const host = config.mediamtx?.host || '127.0.0.1';
-    if (host === 'auto') {
-        return '127.0.0.1'; // Default auto to localhost
+function normalizeHostValue(value) {
+    if (!value) return '';
+    let host = String(value).trim();
+    if (!host) return '';
+    try {
+        if (host.startsWith('http://') || host.startsWith('https://')) {
+            const url = new URL(host);
+            return url.hostname || '';
+        }
+    } catch (e) {}
+    host = host.split('/')[0];
+    if (host.includes(':')) {
+        host = host.split(':')[0];
     }
     return host;
+}
+
+function getEffectiveMediaMtxHost() {
+    const rawHost = config.mediamtx?.host || '127.0.0.1';
+    if (rawHost === 'auto') {
+        return '127.0.0.1';
+    }
+    return normalizeHostValue(rawHost) || '127.0.0.1';
+}
+
+function getHlsBaseUrl() {
+    const publicUrl = (config.mediamtx?.public_hls_url || '').trim();
+    if (publicUrl) {
+        return publicUrl.replace(/\/+$/, '');
+    }
+    const hlsPort = config.mediamtx?.hls_port || 8856;
+    return `http://127.0.0.1:${hlsPort}`;
+}
+
+function checkHlsUrl(url) {
+    return new Promise((resolve) => {
+        let parsed;
+        try {
+            parsed = new URL(url);
+        } catch (e) {
+            resolve(false);
+            return;
+        }
+        const client = parsed.protocol === 'https:' ? https : http;
+        const req = client.request(
+            {
+                hostname: parsed.hostname,
+                port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+                path: parsed.pathname + parsed.search,
+                method: 'GET',
+                timeout: 2500
+            },
+            (res) => {
+                res.resume();
+                resolve(res.statusCode >= 200 && res.statusCode < 400);
+            }
+        );
+        req.on('timeout', () => {
+            req.destroy();
+            resolve(false);
+        });
+        req.on('error', () => resolve(false));
+        req.end();
+    });
+}
+
+async function checkHlsStatus(cameraId) {
+    const baseUrl = getHlsBaseUrl();
+    const transcodedUrl = `${baseUrl}/cam_${cameraId}/index.m3u8`;
+    const inputUrl = `${baseUrl}/cam_${cameraId}_input/index.m3u8`;
+    const [transcodedReady, inputReady] = await Promise.all([
+        checkHlsUrl(transcodedUrl),
+        checkHlsUrl(inputUrl)
+    ]);
+    return {
+        ready: transcodedReady || inputReady,
+        transcoded: transcodedReady
+    };
 }
 
 app.locals.site = config.site;
@@ -239,6 +312,38 @@ app.use((req, res, next) => {
     next();
 });
 app.use('/recordings', express.static(path.join(__dirname, 'recordings')));
+app.use('/hls', (req, res) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+        res.status(405).end();
+        return;
+    }
+    const basePath = req.originalUrl.replace(/^\/hls/, '');
+    const targetHost = getEffectiveMediaMtxHost();
+    const targetPort = config.mediamtx?.hls_port || 8856;
+    const options = {
+        hostname: targetHost,
+        port: targetPort,
+        path: basePath || '/',
+        method: req.method,
+        headers: {
+            ...req.headers,
+            host: targetHost
+        }
+    };
+    const proxyReq = http.request(options, (proxyRes) => {
+        res.status(proxyRes.statusCode || 502);
+        Object.entries(proxyRes.headers || {}).forEach(([key, value]) => {
+            if (value !== undefined) {
+                res.setHeader(key, value);
+            }
+        });
+        proxyRes.pipe(res);
+    });
+    proxyReq.on('error', () => {
+        res.status(502).end();
+    });
+    proxyReq.end();
+});
 
 // Session Middleware
 // Jika akses publik lewat Cloudflare (HTTPS), set behind_https_proxy: true di config.json
@@ -317,13 +422,13 @@ function sendTelegramMessage(text) {
 
 
 
-function mediaMtxRequest(method, path, body = null) {
-    return new Promise((resolve, reject) => {
+function mediaMtxRequestInternal(hostname, port, method, path, body = null) {
+    return new Promise((resolve) => {
         const options = {
-            hostname: getEffectiveMediaMtxHost(),
-            port: config.mediamtx?.api_port || 9123,
+            hostname,
+            port,
             path: path.startsWith('/v3/') ? path : '/v3/config/paths' + path,
-            method: method,
+            method,
             headers: {
                 'Content-Type': 'application/json'
             }
@@ -341,7 +446,6 @@ function mediaMtxRequest(method, path, body = null) {
                         resolve({ error: true, message: 'Invalid JSON response', raw: data });
                     }
                 } else {
-                    // Ignore 404 on delete, or specific errors
                     resolve({ error: true, status: res.statusCode, message: data });
                 }
             });
@@ -349,7 +453,6 @@ function mediaMtxRequest(method, path, body = null) {
 
         req.on('error', (e) => {
             console.error(`MediaMTX API Error: ${e.message}`);
-            // Don't reject, just resolve with error so app keeps running
             resolve({ error: true, message: e.message });
         });
 
@@ -358,6 +461,16 @@ function mediaMtxRequest(method, path, body = null) {
         }
         req.end();
     });
+}
+
+async function mediaMtxRequest(method, path, body = null) {
+    const primaryHost = getEffectiveMediaMtxHost();
+    const apiPort = config.mediamtx?.api_port || 9123;
+    const primaryResult = await mediaMtxRequestInternal(primaryHost, apiPort, method, path, body);
+    if (!primaryResult?.error || primaryHost === '127.0.0.1') {
+        return primaryResult;
+    }
+    return mediaMtxRequestInternal('127.0.0.1', apiPort, method, path, body);
 }
 
 async function setupMediaMtxGlobalConfig() {
@@ -513,68 +626,72 @@ async function updateSystemHealth() {
             activePaths = itemsList; // Older versions might return a map
         }
 
-        db.all("SELECT id, nama, lokasi FROM cameras", [], (err, rows) => {
-            if (err) return;
-
-            const now = new Date();
-
-            rows.forEach(cam => {
-                const inputPath = `cam_${cam.id}_input`;
-                const outputPath = `cam_${cam.id}`;
-
-                // Camera is online if either the input path (pulling) or output path (transcoded) is active
-                // and has a source ready/connected.
-                const inputItem = activePaths[inputPath];
-                const outputItem = activePaths[outputPath];
-
-                // Use .ready property which indicates if the source is actually streaming
-                const currentlyOnline = !!((inputItem && inputItem.ready) || (outputItem && outputItem.ready));
-
-                const prevState = cameraStatus[cam.id] || { online: false };
-
-                // Alert on state change
-                if (prevState.hasBeenChecked && currentlyOnline !== prevState.online) {
-                    const statusText = currentlyOnline ? "✅ ONLINE" : "❌ OFFLINE";
-                    const statusEmoji = currentlyOnline ? "📶" : "⚠️";
-                    sendTelegramMessage(`${statusEmoji} <b>Camera ${statusText}</b>\nNama: ${cam.nama}\nLokasi: ${cam.lokasi}`);
-
-                    // Send push notification
-                    sendPushNotification(
-                        `Camera ${statusText}`,
-                        `${cam.nama} at ${cam.lokasi} is now ${currentlyOnline ? 'ONLINE' : 'OFFLINE'}`,
-                        '/'
-                    );
-                }
-
-                let offlineSince = prevState.offlineSince || null;
-                let offlineAlertSent = prevState.offlineAlertSent || false;
-
-                if (!currentlyOnline) {
-                    if (prevState.online) {
-                        offlineSince = now;
-                        offlineAlertSent = false;
-                    } else if (!offlineSince) {
-                        offlineSince = now;
-                    }
-
-                    const thresholdMs = 5 * 60 * 1000;
-                    if (!offlineAlertSent && offlineSince && (now - offlineSince) >= thresholdMs) {
-                        sendTelegramMessage(`⚠️ <b>Camera OFFLINE > 5 menit</b>\nNama: ${cam.nama}\nLokasi: ${cam.lokasi}`);
-                        offlineAlertSent = true;
-                    }
-                } else {
-                    offlineSince = null;
-                    offlineAlertSent = false;
-                }
-
-                cameraStatus[cam.id] = {
-                    online: currentlyOnline,
-                    lastUpdate: now,
-                    hasBeenChecked: true,
-                    offlineSince,
-                    offlineAlertSent
-                };
+        const rows = await new Promise((resolve) => {
+            db.all("SELECT id, nama, lokasi FROM cameras", [], (err, result) => {
+                if (err) return resolve([]);
+                resolve(result || []);
             });
+        });
+
+        const now = new Date();
+        const hlsStatuses = await Promise.all(
+            rows.map((cam) => checkHlsStatus(cam.id))
+        );
+
+        rows.forEach((cam, idx) => {
+            const inputPath = `cam_${cam.id}_input`;
+            const outputPath = `cam_${cam.id}`;
+
+            const inputItem = activePaths[inputPath];
+            const outputItem = activePaths[outputPath];
+
+            const hlsStatus = hlsStatuses[idx] || { ready: false, transcoded: false };
+            const currentlyOnline = !!(hlsStatus.ready || (inputItem && inputItem.ready) || (outputItem && outputItem.ready));
+
+            const prevState = cameraStatus[cam.id] || { online: false };
+
+            if (prevState.hasBeenChecked && currentlyOnline !== prevState.online) {
+                const statusText = currentlyOnline ? "✅ ONLINE" : "❌ OFFLINE";
+                const statusEmoji = currentlyOnline ? "📶" : "⚠️";
+                sendTelegramMessage(`${statusEmoji} <b>Camera ${statusText}</b>\nNama: ${cam.nama}\nLokasi: ${cam.lokasi}`);
+
+                sendPushNotification(
+                    `Camera ${statusText}`,
+                    `${cam.nama} at ${cam.lokasi} is now ${currentlyOnline ? 'ONLINE' : 'OFFLINE'}`,
+                    '/'
+                );
+            }
+
+            let offlineSince = prevState.offlineSince || null;
+            let offlineAlertSent = prevState.offlineAlertSent || false;
+
+            if (!currentlyOnline) {
+                if (prevState.online) {
+                    offlineSince = now;
+                    offlineAlertSent = false;
+                } else if (!offlineSince) {
+                    offlineSince = now;
+                }
+
+                const thresholdMs = 5 * 60 * 1000;
+                if (!offlineAlertSent && offlineSince && (now - offlineSince) >= thresholdMs) {
+                    sendTelegramMessage(`⚠️ <b>Camera OFFLINE > 5 menit</b>\nNama: ${cam.nama}\nLokasi: ${cam.lokasi}`);
+                    offlineAlertSent = true;
+                }
+            } else {
+                offlineSince = null;
+                offlineAlertSent = false;
+            }
+
+            cameraStatus[cam.id] = {
+                online: currentlyOnline,
+                lastUpdate: now,
+                hasBeenChecked: true,
+                offlineSince,
+                offlineAlertSent,
+                hlsReady: hlsStatus.ready,
+                hlsTranscoded: hlsStatus.transcoded
+            };
         });
     } catch (e) {
         if (!mediaMtxErrorNotified) {

@@ -180,6 +180,7 @@ sed -i 's/apiAddress: :[0-9]\+/apiAddress: :9123/g' mediamtx.yml
 sed -i 's/^api: .*/api: yes/g' mediamtx.yml
 # Set HLS to fMP4 for H265 support
 sed -i 's/hlsVariant: .*/hlsVariant: fmp4/g' mediamtx.yml
+sed -i 's/recordFormat: .*/recordFormat: fmp4/g' mediamtx.yml
 # Set recording retention to 7 days
 sed -i 's/recordDeleteAfter: .*/recordDeleteAfter: 7d/g' mediamtx.yml
 # Linux: use .sh for record notify (Node app will also set runOnReady via API on startup)
@@ -193,7 +194,7 @@ Description=MediaMTX Streaming Server
 After=network.target
 
 [Service]
-ExecStart=$FULL_PATH/mediamtx
+ExecStart=$FULL_PATH/mediamtx $FULL_PATH/mediamtx.yml
 WorkingDirectory=$FULL_PATH
 User=$CURRENT_USER
 Environment=TZ=Asia/Jakarta
@@ -258,5 +259,12 @@ echo ""
 echo "🔧 Configuration:"
 echo "   - HLS Port: 8856 (fMP4 with H265 support)"
 echo "   - RTSP Port: 8555"
+echo ""
+echo "🧪 Quick Check Commands:"
+echo "   - systemctl status cctv-web --no-pager"
+echo "   - systemctl status mediamtx --no-pager"
+echo "   - journalctl -u cctv-web -n 50 --no-pager"
+echo "   - journalctl -u mediamtx -n 50 --no-pager"
+echo "   - curl -I http://127.0.0.1:8856/healthz || true"
 echo "   - Recording: 7 days retention"
 echo ""

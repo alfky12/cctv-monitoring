@@ -7,12 +7,12 @@ paths:
 
 record: yes
 recordPath: ./recordings/%path/%Y-%m-%d_%H-%M-%S.mp4
-recordFormat: mp4
+recordFormat: fmp4
 
 # RTSP
 rtspAddress: :8555
-rtpAddress: :8100
-rtcpAddress: :8101
+rtpAddress: :8050
+rtcpAddress: :8051
 
 # RTMP
 rtmpAddress: :1936

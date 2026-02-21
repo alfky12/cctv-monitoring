@@ -50,6 +50,7 @@ if [[ "$FILE_TYPE" == *"HTML"* ]] || [[ "$FILE_TYPE" == *"text"* ]]; then
     sed -i 's/apiAddress: :[0-9]\+/apiAddress: :9123/g' mediamtx.yml
     sed -i 's/^api: .*/api: yes/g' mediamtx.yml
     sed -i 's/hlsVariant: .*/hlsVariant: fmp4/g' mediamtx.yml
+    sed -i 's/recordFormat: .*/recordFormat: fmp4/g' mediamtx.yml
     sed -i 's/recordDeleteAfter: .*/recordDeleteAfter: 7d/g' mediamtx.yml
     sed -i 's/record_notify\.bat/record_notify.sh/g' mediamtx.yml
 fi
@@ -75,6 +76,7 @@ if ps -p $PID > /dev/null; then
         sed -i 's/rtmpAddress: :1935/rtmpAddress: :1936/g' mediamtx.yml
         sed -i 's/webrtcAddress: :8889/webrtcAddress: :8890/g' mediamtx.yml
         sed -i 's/webrtcICEUDPMuxAddress: :8189/webrtcICEUDPMuxAddress: ""/g' mediamtx.yml
+        sed -i 's/recordFormat: .*/recordFormat: fmp4/g' mediamtx.yml
     fi
 
     sudo systemctl restart mediamtx
