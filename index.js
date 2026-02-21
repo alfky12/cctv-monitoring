@@ -57,6 +57,73 @@ function formatDateJakarta(date) {
     return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
 }
 
+function getRecordingsFromFilesystem(selectedDate) {
+    const fs = require('fs');
+    const recordingsDir = path.join(__dirname, 'recordings');
+    if (!fs.existsSync(recordingsDir)) return [];
+
+    let cameraFolders = [];
+    try {
+        cameraFolders = fs.readdirSync(recordingsDir).filter(f => {
+            const fullPath = path.join(recordingsDir, f);
+            return fs.statSync(fullPath).isDirectory() && f.startsWith('cam_');
+        });
+    } catch (e) {
+        return [];
+    }
+
+    const items = [];
+    cameraFolders.forEach(folder => {
+        const folderPath = path.join(recordingsDir, folder);
+        let files = [];
+        try {
+            files = fs.readdirSync(folderPath);
+        } catch (e) {
+            return;
+        }
+
+        const cameraId = Number(folder.replace('cam_', '')) || null;
+        files.forEach(file => {
+            const fullPath = path.join(folderPath, file);
+            let stats;
+            try {
+                stats = fs.statSync(fullPath);
+            } catch (e) {
+                return;
+            }
+            if (!stats.isFile()) return;
+
+            const match = file.match(/(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/);
+            let createdAt;
+            if (match) {
+                const iso = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}+07:00`;
+                const parsed = new Date(iso);
+                createdAt = isNaN(parsed.getTime()) ? formatDateJakarta(stats.mtime) : formatDateJakarta(parsed);
+            } else {
+                createdAt = formatDateJakarta(stats.mtime);
+            }
+
+            if (selectedDate && !createdAt.startsWith(selectedDate)) return;
+
+            const createdAtIso = createdAt.replace(' ', 'T') + '+07:00';
+            const relativePath = path.join('recordings', folder, file).replace(/\\/g, '/');
+            items.push({
+                camera_id: cameraId,
+                camera_folder: folder,
+                filename: file,
+                file_path: relativePath,
+                size: stats.size,
+                duration: null,
+                created_at: createdAt,
+                created_at_iso: createdAtIso
+            });
+        });
+    });
+
+    items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return items;
+}
+
 // RTSP URL Templates for various camera brands
 const RTSP_TEMPLATES = {
     hikvision: {
@@ -582,31 +649,31 @@ app.get('/', (req, res) => {
 // Public Archive (Recordings)
 app.get('/archive', (req, res) => {
     console.log('Accessing /archive route');
-    const defaultDate = formatDateJakarta(new Date()).slice(0, 10);
-    const selectedDate = (req.query && req.query.date) ? String(req.query.date) : defaultDate;
-    const query = `
-        SELECT r.*, c.nama as camera_name 
-        FROM recordings r 
-        LEFT JOIN cameras c ON r.camera_id = c.id 
-        WHERE r.created_at LIKE ? || '%'
-        ORDER BY r.created_at DESC
-        LIMIT ?
-    `;
+    const selectedDate = (req.query && req.query.date) ? String(req.query.date) : '';
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const size = Math.min(500, Math.max(50, parseInt(req.query.size, 10) || 200));
+    const allRecordings = getRecordingsFromFilesystem(selectedDate);
+    const totalCount = allRecordings.length;
+    const totalPages = Math.max(1, Math.ceil(totalCount / size));
+    const safePage = Math.min(page, totalPages);
+    const offset = (safePage - 1) * size;
+    const recordings = allRecordings.slice(offset, offset + size);
 
-    db.all(query, [selectedDate, RECORDINGS_PAGE_LIMIT], (err, rows) => {
-        if (err) {
-            console.error(err.message);
-            return res.status(500).send("Database Error");
-        }
-
-        // Also get cameras for filter dropdown if needed
-        db.all("SELECT id, nama FROM cameras", [], (errCam, cams) => {
-            res.render('public_recordings', {
-                recordings: rows,
-                cameras: cams || [],
-                site: config.site,
-                filterDate: selectedDate
-            });
+    db.all("SELECT id, nama FROM cameras", [], (errCam, cams) => {
+        const cameraNameById = new Map((cams || []).map(cam => [String(cam.id), cam.nama]));
+        const normalized = recordings.map(rec => {
+            const name = cameraNameById.get(String(rec.camera_id)) || rec.camera_folder || 'Unknown';
+            return { ...rec, camera_name: name };
+        });
+        res.render('public_recordings', {
+            recordings: normalized,
+            cameras: cams || [],
+            site: config.site,
+            filterDate: selectedDate,
+            totalCount,
+            currentPage: safePage,
+            totalPages,
+            pageSize: size
         });
     });
 });
@@ -688,16 +755,50 @@ app.get('/admin', requireAuth, (req, res) => {
 });
 
 app.get('/admin/recordings', requireAuth, (req, res) => {
-    const query = `
-        SELECT r.*, c.nama as camera_name 
-        FROM recordings r 
-        JOIN cameras c ON r.camera_id = c.id 
-        ORDER BY r.created_at DESC
-        LIMIT ?
-    `;
-    db.all(query, [RECORDINGS_PAGE_LIMIT], (err, rows) => {
-        if (err) return console.error(err.message);
-        res.render('recordings', { recordings: rows, user: req.session.user });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const size = Math.min(500, Math.max(50, parseInt(req.query.size, 10) || 200));
+    const allRecordings = getRecordingsFromFilesystem('');
+    const totalCount = allRecordings.length;
+    const totalPages = Math.max(1, Math.ceil(totalCount / size));
+    const safePage = Math.min(page, totalPages);
+    const offset = (safePage - 1) * size;
+    const recordings = allRecordings.slice(offset, offset + size);
+
+    db.all("SELECT id, nama FROM cameras", [], (errCam, cams) => {
+        if (errCam) return console.error(errCam.message);
+        const cameraNameById = new Map((cams || []).map(cam => [String(cam.id), cam.nama]));
+
+        const filePaths = recordings.map(r => r.file_path);
+        if (filePaths.length === 0) {
+            return res.render('recordings', {
+                recordings: [],
+                user: req.session.user,
+                totalCount,
+                currentPage: safePage,
+                totalPages,
+                pageSize: size
+            });
+        }
+
+        const placeholders = filePaths.map(() => '?').join(',');
+        db.all(`SELECT id, file_path FROM recordings WHERE file_path IN (${placeholders})`, filePaths, (errRec, rows) => {
+            if (errRec) return console.error(errRec.message);
+            const idByPath = new Map((rows || []).map(r => [r.file_path, r.id]));
+
+            const normalized = recordings.map(rec => {
+                const name = cameraNameById.get(String(rec.camera_id)) || rec.camera_folder || 'Unknown';
+                return { ...rec, camera_name: name, id: idByPath.get(rec.file_path) || null };
+            });
+
+            res.render('recordings', {
+                recordings: normalized,
+                user: req.session.user,
+                totalCount,
+                currentPage: safePage,
+                totalPages,
+                pageSize: size
+            });
+        });
     });
 });
 

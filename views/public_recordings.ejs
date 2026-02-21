@@ -162,7 +162,7 @@
                 </h2>
                 <div class="flex items-center gap-3">
                     <span class="text-sm text-gray-500 px-3 py-1 bg-gray-800 rounded-full border border-gray-700">
-                        <%= recordings.length %> File Tersimpan
+                        <%= typeof totalCount !== 'undefined' ? totalCount : recordings.length %> File Tersimpan
                     </span>
                     <div class="flex gap-2">
                         <input type="date" id="dateFilter" class="date-filter" onchange="filterByDate()" value="<%= typeof filterDate !== 'undefined' ? filterDate : '' %>">
@@ -181,10 +181,27 @@
                                                         <%= name %>
                                                     </option>
                                                     <% }); %>
-                                                        <% } %>
+                                    <% } %>
                         </select>
                     </div>
                 </div>
+            </div>
+            <div class="flex items-center justify-between text-xs text-gray-400 mb-4">
+                <span>
+                    Menampilkan
+                    <%= recordings.length %>
+                    dari
+                    <%= typeof totalCount !== 'undefined' ? totalCount : recordings.length %>
+                    file
+                </span>
+                <span>
+                    Halaman
+                    <%= typeof currentPage !== 'undefined' ? currentPage : 1 %>
+                    /
+                    <%= typeof totalPages !== 'undefined' ? totalPages : 1 %>
+                    •
+                    <%= typeof pageSize !== 'undefined' ? pageSize : recordings.length %> per halaman
+                </span>
             </div>
 
             <!-- Timeline Section -->
@@ -226,7 +243,7 @@
                         <thead>
                             <tr class="bg-gray-900 text-gray-400 text-sm uppercase tracking-wider">
                                 <th class="p-4 font-semibold border-b border-gray-700 w-1/4">Kamera</th>
-                                <th class="p-4 font-semibold border-b border-gray-700">Preview</th>
+                                <th class="p-4 font-semibold border-b border-gray-700">Nama File</th>
                                 <th class="p-4 font-semibold border-b border-gray-700">Waktu Rekam</th>
                                 <th class="p-4 font-semibold border-b border-gray-700">Durasi</th>
                                 <th class="p-4 font-semibold border-b border-gray-700">Ukuran</th>
@@ -236,17 +253,13 @@
                         <tbody class="divide-y divide-gray-700" id="recordingsBody">
                             <% recordings.forEach(function(rec) { %>
                                 <tr class="table-row-hover transition duration-150 recording-row"
-                                    data-camera="<%= rec.camera_name %>" data-time="<%= rec.created_at %><%= rec.created_at.includes('Z') ? '' : 'Z' %>"
+                                    data-camera="<%= rec.camera_name %>" data-time="<%= rec.created_at_iso || rec.created_at %>"
                                     data-file="/<%= rec.file_path %>">
                                     <td class="p-4 font-medium text-white">
                                         <%= rec.camera_name %>
                                     </td>
-                                    <td class="p-4">
-                                        <video class="w-24 h-16 rounded object-cover bg-black" muted playsinline
-                                            preload="none" data-src="/<%= rec.file_path %>"
-                                            onmouseenter="startPreview(this)"
-                                            onmouseleave="stopPreview(this)">
-                                        </video>
+                                    <td class="p-4 text-gray-300 text-sm font-mono break-all">
+                                        <%= rec.filename || rec.file_path %>
                                     </td>
                                     <td class="p-4 text-gray-300">
                                         <%= new Date(rec.created_at + (rec.created_at.includes('Z') ? '' : 'Z')).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'medium' }) %>
@@ -276,6 +289,35 @@
                     <div id="noRecordings" class="hidden p-8 text-center text-gray-500 italic">
                         Tidak ada rekaman untuk filter yang dipilih.
                     </div>
+                </div>
+            </div>
+            <div class="flex flex-col md:flex-row items-center justify-between gap-3 text-sm text-gray-300">
+                <div class="flex items-center gap-2">
+                    <% const sizeParam = (typeof pageSize !== 'undefined' ? pageSize : 200); %>
+                    <% const dateParam = (typeof filterDate !== 'undefined' ? filterDate : ''); %>
+                    <% const pageParam = (typeof currentPage !== 'undefined' ? currentPage : 1); %>
+                    <% const totalPagesParam = (typeof totalPages !== 'undefined' ? totalPages : 1); %>
+                    <% const prevPage = Math.max(1, pageParam - 1); %>
+                    <% const nextPage = Math.min(totalPagesParam, pageParam + 1); %>
+                    <% const baseQuery = `size=${sizeParam}` + (dateParam ? `&date=${dateParam}` : ''); %>
+                    <a href="/archive?<%= baseQuery %>&page=<%= prevPage %>"
+                        class="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded border border-gray-700 <%= pageParam <= 1 ? 'opacity-50 pointer-events-none' : '' %>">
+                        Sebelumnya
+                    </a>
+                    <a href="/archive?<%= baseQuery %>&page=<%= nextPage %>"
+                        class="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded border border-gray-700 <%= pageParam >= totalPagesParam ? 'opacity-50 pointer-events-none' : '' %>">
+                        Berikutnya
+                    </a>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span>Per halaman:</span>
+                    <% const sizes = [100, 200, 300, 500]; %>
+                    <% sizes.forEach(function(s) { %>
+                        <a href="/archive?<%= (dateParam ? `date=${dateParam}&` : '') %>size=<%= s %>&page=1"
+                            class="px-3 py-1 rounded border border-gray-700 <%= sizeParam === s ? 'bg-green-600 text-white' : 'bg-gray-800 hover:bg-gray-700' %>">
+                            <%= s %>
+                        </a>
+                    <% }); %>
                 </div>
             </div>
         </div>
@@ -360,26 +402,6 @@
 
     <!-- Main Logic Script -->
     <script>
-        function startPreview(videoEl) {
-            try {
-                if (!videoEl.src && videoEl.dataset && videoEl.dataset.src) {
-                    videoEl.src = videoEl.dataset.src;
-                }
-                videoEl.currentTime = 0;
-                const playPromise = videoEl.play();
-                if (playPromise && playPromise.catch) {
-                    playPromise.catch(() => {});
-                }
-            } catch (e) {}
-        }
-
-        function stopPreview(videoEl) {
-            try {
-                videoEl.pause();
-                videoEl.currentTime = 0;
-            } catch (e) {}
-        }
-
         const modal = document.getElementById('video-modal');
         const player = document.getElementById('modal-player');
         let allRecordings = [];
@@ -397,11 +419,6 @@
         let filteredRecordings = [...allRecordings];
 
         document.addEventListener('DOMContentLoaded', () => {
-            const df = document.getElementById('dateFilter');
-            if (!df.value) {
-                df.valueAsDate = new Date();
-            }
-
             renderTimeline();
             filterByDate();
         });
@@ -521,7 +538,6 @@
             modal.style.display = 'flex';
             document.getElementById('videoTitle').textContent = cameraName;
             document.getElementById('videoInfo').textContent = new Date(createdAt).toLocaleString('id-ID');
-            document.getElementById('error-download-link').href = url;
 
             const rateSelect = document.getElementById('playbackRateSelectPublic');
             if (rateSelect) {
@@ -536,7 +552,6 @@
                 document.getElementById('modal-player').classList.add('hidden');
             };
 
-            // Setup Timeline
             player.ontimeupdate = () => {
                 if (!player.duration) return;
                 const percent = (player.currentTime / player.duration) * 100;

@@ -6,8 +6,8 @@ paths:
 # Global settings
 
 record: yes
-recordPath: ./recordings/%path/%Y-%m-%d_%H-%M-%S
-recordFormat: fmp4
+recordPath: ./recordings/%path/%Y-%m-%d_%H-%M-%S.mp4
+recordFormat: mp4
 
 # RTSP
 rtspAddress: :8555

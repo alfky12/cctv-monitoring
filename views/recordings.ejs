@@ -190,7 +190,24 @@
                         Footage Rekaman CCTV
                     </h2>
                     <span class="text-sm text-gray-500 px-3 py-1 bg-gray-800 rounded-full border border-gray-700">
-                        <%= recordings.length %> File Tersimpan
+                        <%= typeof totalCount !== 'undefined' ? totalCount : recordings.length %> File Tersimpan
+                    </span>
+                </div>
+                <div class="flex items-center justify-between text-xs text-gray-400 mb-4">
+                    <span>
+                        Menampilkan
+                        <%= recordings.length %>
+                        dari
+                        <%= typeof totalCount !== 'undefined' ? totalCount : recordings.length %>
+                        file
+                    </span>
+                    <span>
+                        Halaman
+                        <%= typeof currentPage !== 'undefined' ? currentPage : 1 %>
+                        /
+                        <%= typeof totalPages !== 'undefined' ? totalPages : 1 %>
+                        •
+                        <%= typeof pageSize !== 'undefined' ? pageSize : recordings.length %> per halaman
                     </span>
                 </div>
 
@@ -215,6 +232,8 @@
                                         </option>
                                         <% }); %>
                             </select>
+                            <input type="text" id="nameFilter" class="date-filter" placeholder="Cari nama file"
+                                oninput="filterByName()">
                         </div>
                     </div>
 
@@ -244,7 +263,7 @@
                             <thead>
                                 <tr class="bg-gray-900 text-gray-400 text-sm uppercase tracking-wider">
                                     <th class="p-4 font-semibold border-b border-gray-700 w-1/4">Kamera</th>
-                                    <th class="p-4 font-semibold border-b border-gray-700">Preview</th>
+                                    <th class="p-4 font-semibold border-b border-gray-700">Nama File</th>
                                     <th class="p-4 font-semibold border-b border-gray-700">Waktu Rekam</th>
                                     <th class="p-4 font-semibold border-b border-gray-700">Durasi</th>
                                     <th class="p-4 font-semibold border-b border-gray-700">Ukuran</th>
@@ -254,20 +273,18 @@
                             <tbody class="divide-y divide-gray-700" id="recordingsBody">
                                 <% recordings.forEach(function(rec) { %>
                                     <tr class="table-row-hover transition duration-150 recording-row"
-                                        data-camera="<%= rec.camera_name %>" data-time="<%= rec.created_at %>"
+                                        data-camera="<%= rec.camera_name %>"
+                                        data-time="<%= rec.created_at_iso || rec.created_at %>"
+                                        data-filename="<%= rec.filename || rec.file_path %>"
                                         data-file="/<%= rec.file_path %>">
                                         <td class="p-4 font-medium text-white">
                                             <%= rec.camera_name %>
                                         </td>
-                                        <td class="p-4">
-                                            <video class="w-24 h-16 rounded object-cover bg-black" muted playsinline
-                                                preload="none" data-src="/<%= rec.file_path %>"
-                                                onmouseenter="startPreview(this)"
-                                                onmouseleave="stopPreview(this)">
-                                            </video>
+                                        <td class="p-4 text-gray-300 text-sm font-mono break-all">
+                                            <%= rec.filename || rec.file_path %>
                                         </td>
                                         <td class="p-4 text-gray-300">
-                                            <%= new Date(rec.created_at).toLocaleString('id-ID') %>
+                                            <%= new Date(rec.created_at_iso || rec.created_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'medium' }) %>
                                         </td>
                                         <td class="p-4 text-gray-400 text-sm">
                                             <%= rec.duration ? rec.duration + 's' : '-' %>
@@ -315,6 +332,33 @@
                         </table>
                         <div id="noRecordings" class="hidden p-8 text-center text-gray-500 italic">
                             Tidak ada rekaman untuk filter yang dipilih.
+                        </div>
+                    </div>
+                    <div class="flex flex-col md:flex-row items-center justify-between gap-3 text-sm text-gray-300 mt-4">
+                        <div class="flex items-center gap-2">
+                            <% const sizeParam = (typeof pageSize !== 'undefined' ? pageSize : 200); %>
+                            <% const pageParam = (typeof currentPage !== 'undefined' ? currentPage : 1); %>
+                            <% const totalPagesParam = (typeof totalPages !== 'undefined' ? totalPages : 1); %>
+                            <% const prevPage = Math.max(1, pageParam - 1); %>
+                            <% const nextPage = Math.min(totalPagesParam, pageParam + 1); %>
+                            <a href="/admin/recordings?size=<%= sizeParam %>&page=<%= prevPage %>"
+                                class="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded border border-gray-700 <%= pageParam <= 1 ? 'opacity-50 pointer-events-none' : '' %>">
+                                Sebelumnya
+                            </a>
+                            <a href="/admin/recordings?size=<%= sizeParam %>&page=<%= nextPage %>"
+                                class="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded border border-gray-700 <%= pageParam >= totalPagesParam ? 'opacity-50 pointer-events-none' : '' %>">
+                                Berikutnya
+                            </a>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span>Per halaman:</span>
+                            <% const sizes = [100, 200, 300, 500]; %>
+                            <% sizes.forEach(function(s) { %>
+                                <a href="/admin/recordings?size=<%= s %>&page=1"
+                                    class="px-3 py-1 rounded border border-gray-700 <%= sizeParam === s ? 'bg-green-600 text-white' : 'bg-gray-800 hover:bg-gray-700' %>">
+                                    <%= s %>
+                                </a>
+                            <% }); %>
                         </div>
                     </div>
                 </div>
@@ -399,26 +443,6 @@
         </div>
 
         <script>
-            function startPreview(videoEl) {
-                try {
-                    if (!videoEl.src && videoEl.dataset && videoEl.dataset.src) {
-                        videoEl.src = videoEl.dataset.src;
-                    }
-                    videoEl.currentTime = 0;
-                    const playPromise = videoEl.play();
-                    if (playPromise && playPromise.catch) {
-                        playPromise.catch(() => { });
-                    }
-                } catch (e) { }
-            }
-
-            function stopPreview(videoEl) {
-                try {
-                    videoEl.pause();
-                    videoEl.currentTime = 0;
-                } catch (e) { }
-            }
-
             const modal = document.getElementById('video-modal');
             const player = document.getElementById('modal-player');
             let currentRecording = null;
@@ -430,6 +454,7 @@
                     id: deleteBtn ? deleteBtn.dataset.id : null,
                     camera_name: row.dataset.camera,
                     created_at: row.dataset.time,
+                    filename: row.dataset.filename,
                     file_path: row.dataset.file?.substring(1),
                     size: 0 // Size not easily accessible from DOM
                 });
@@ -557,8 +582,9 @@
             function filterByDate() {
                 const dateFilter = document.getElementById('dateFilter').value;
                 const cameraFilter = document.getElementById('cameraFilter').value;
+                const nameFilter = document.getElementById('nameFilter').value;
 
-                applyFilters(dateFilter, cameraFilter);
+                applyFilters(dateFilter, cameraFilter, nameFilter);
                 renderTimeline();
             }
 
@@ -566,15 +592,26 @@
             function filterByCamera() {
                 const dateFilter = document.getElementById('dateFilter').value;
                 const cameraFilter = document.getElementById('cameraFilter').value;
+                const nameFilter = document.getElementById('nameFilter').value;
 
-                applyFilters(dateFilter, cameraFilter);
+                applyFilters(dateFilter, cameraFilter, nameFilter);
                 renderTimeline();
             }
 
-            function applyFilters(dateFilter, cameraFilter) {
+            function filterByName() {
+                const dateFilter = document.getElementById('dateFilter').value;
+                const cameraFilter = document.getElementById('cameraFilter').value;
+                const nameFilter = document.getElementById('nameFilter').value;
+
+                applyFilters(dateFilter, cameraFilter, nameFilter);
+                renderTimeline();
+            }
+
+            function applyFilters(dateFilter, cameraFilter, nameFilter) {
                 filteredRecordings = allRecordings.filter(rec => {
                     let matchDate = true;
                     let matchCamera = true;
+                    let matchName = true;
 
                     if (dateFilter) {
                         const recDate = new Date(rec.created_at).toDateString();
@@ -586,7 +623,13 @@
                         matchCamera = rec.camera_name === cameraFilter;
                     }
 
-                    return matchDate && matchCamera;
+                    if (nameFilter) {
+                        const needle = nameFilter.toLowerCase();
+                        const hay = String(rec.filename || rec.file_path || '').toLowerCase();
+                        matchName = hay.includes(needle);
+                    }
+
+                    return matchDate && matchCamera && matchName;
                 });
 
                 // Update table visibility
@@ -596,6 +639,7 @@
                 rows.forEach(row => {
                     const camera = row.dataset.camera;
                     const time = row.dataset.time;
+                    const filename = row.dataset.filename || '';
 
                     let show = true;
                     if (cameraFilter && camera !== cameraFilter) show = false;
@@ -603,6 +647,10 @@
                         const rowDate = new Date(time).toDateString();
                         const filterDate = new Date(dateFilter).toDateString();
                         if (rowDate !== filterDate) show = false;
+                    }
+                    if (nameFilter) {
+                        const needle = nameFilter.toLowerCase();
+                        if (!filename.toLowerCase().includes(needle)) show = false;
                     }
 
                     row.style.display = show ? '' : 'none';
