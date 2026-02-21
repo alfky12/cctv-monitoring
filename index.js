@@ -73,7 +73,7 @@ function checkHlsUrl(url) {
                 port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
                 path: parsed.pathname + parsed.search,
                 method: 'GET',
-                timeout: 2500
+                timeout: 5000
             },
             (res) => {
                 res.resume();
@@ -646,9 +646,26 @@ async function updateSystemHealth() {
             const outputItem = activePaths[outputPath];
 
             const hlsStatus = hlsStatuses[idx] || { ready: false, transcoded: false };
-            const currentlyOnline = !!(hlsStatus.ready || (inputItem && inputItem.ready) || (outputItem && outputItem.ready));
+            const rawOnline = !!(hlsStatus.ready || (inputItem && inputItem.ready) || (outputItem && outputItem.ready));
 
-            const prevState = cameraStatus[cam.id] || { online: false };
+            const prevState = cameraStatus[cam.id] || { online: false, consecutiveOnline: 0, consecutiveOffline: 0 };
+            let consecutiveOnline = prevState.consecutiveOnline || 0;
+            let consecutiveOffline = prevState.consecutiveOffline || 0;
+            let currentlyOnline = prevState.online;
+
+            if (rawOnline) {
+                consecutiveOnline += 1;
+                consecutiveOffline = 0;
+                if (consecutiveOnline >= 2) {
+                    currentlyOnline = true;
+                }
+            } else {
+                consecutiveOffline += 1;
+                consecutiveOnline = 0;
+                if (consecutiveOffline >= 2) {
+                    currentlyOnline = false;
+                }
+            }
 
             if (prevState.hasBeenChecked && currentlyOnline !== prevState.online) {
                 const statusText = currentlyOnline ? "✅ ONLINE" : "❌ OFFLINE";
@@ -690,7 +707,9 @@ async function updateSystemHealth() {
                 offlineSince,
                 offlineAlertSent,
                 hlsReady: hlsStatus.ready,
-                hlsTranscoded: hlsStatus.transcoded
+                hlsTranscoded: hlsStatus.transcoded,
+                consecutiveOnline,
+                consecutiveOffline
             };
         });
     } catch (e) {
