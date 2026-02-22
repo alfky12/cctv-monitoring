@@ -73,7 +73,7 @@ function checkHlsUrl(url) {
                 port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
                 path: parsed.pathname + parsed.search,
                 method: 'GET',
-                timeout: 5000
+                timeout: 2500
             },
             (res) => {
                 res.resume();
@@ -312,38 +312,6 @@ app.use((req, res, next) => {
     next();
 });
 app.use('/recordings', express.static(path.join(__dirname, 'recordings')));
-app.use('/hls', (req, res) => {
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-        res.status(405).end();
-        return;
-    }
-    const basePath = req.originalUrl.replace(/^\/hls/, '');
-    const targetHost = getEffectiveMediaMtxHost();
-    const targetPort = config.mediamtx?.hls_port || 8856;
-    const options = {
-        hostname: targetHost,
-        port: targetPort,
-        path: basePath || '/',
-        method: req.method,
-        headers: {
-            ...req.headers,
-            host: targetHost
-        }
-    };
-    const proxyReq = http.request(options, (proxyRes) => {
-        res.status(proxyRes.statusCode || 502);
-        Object.entries(proxyRes.headers || {}).forEach(([key, value]) => {
-            if (value !== undefined) {
-                res.setHeader(key, value);
-            }
-        });
-        proxyRes.pipe(res);
-    });
-    proxyReq.on('error', () => {
-        res.status(502).end();
-    });
-    proxyReq.end();
-});
 
 // Session Middleware
 // Jika akses publik lewat Cloudflare (HTTPS), set behind_https_proxy: true di config.json
@@ -646,26 +614,9 @@ async function updateSystemHealth() {
             const outputItem = activePaths[outputPath];
 
             const hlsStatus = hlsStatuses[idx] || { ready: false, transcoded: false };
-            const rawOnline = !!(hlsStatus.ready || (inputItem && inputItem.ready) || (outputItem && outputItem.ready));
+            const currentlyOnline = !!(hlsStatus.ready || (inputItem && inputItem.ready) || (outputItem && outputItem.ready));
 
-            const prevState = cameraStatus[cam.id] || { online: false, consecutiveOnline: 0, consecutiveOffline: 0 };
-            let consecutiveOnline = prevState.consecutiveOnline || 0;
-            let consecutiveOffline = prevState.consecutiveOffline || 0;
-            let currentlyOnline = prevState.online;
-
-            if (rawOnline) {
-                consecutiveOnline += 1;
-                consecutiveOffline = 0;
-                if (consecutiveOnline >= 2) {
-                    currentlyOnline = true;
-                }
-            } else {
-                consecutiveOffline += 1;
-                consecutiveOnline = 0;
-                if (consecutiveOffline >= 2) {
-                    currentlyOnline = false;
-                }
-            }
+            const prevState = cameraStatus[cam.id] || { online: false };
 
             if (prevState.hasBeenChecked && currentlyOnline !== prevState.online) {
                 const statusText = currentlyOnline ? "✅ ONLINE" : "❌ OFFLINE";
@@ -707,9 +658,7 @@ async function updateSystemHealth() {
                 offlineSince,
                 offlineAlertSent,
                 hlsReady: hlsStatus.ready,
-                hlsTranscoded: hlsStatus.transcoded,
-                consecutiveOnline,
-                consecutiveOffline
+                hlsTranscoded: hlsStatus.transcoded
             };
         });
     } catch (e) {

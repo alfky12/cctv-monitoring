@@ -283,7 +283,7 @@
                                 var overlay = document.getElementById('cam-overlay-<%= camera.id %>');
                                 var overlayText = document.getElementById('cam-overlay-text-<%= camera.id %>');
                                 // Priority: public_hls_url > dynamic local URL
-                                var baseUrl = '<%= mediamtx.public_hls_url %>' || (window.location.origin + '/hls');
+                                var baseUrl = '<%= mediamtx.public_hls_url %>' || (window.location.protocol + '//' + window.location.hostname + ':<%= hls_port %>');
 
                                 // Try transcoded stream first (H.264), fallback to raw input
                                 var transcodedSrc = baseUrl + '/cam_<%= camera.id %>/index.m3u8';
@@ -700,7 +700,7 @@
 
                                 // Use public_hls_url if configured, otherwise use current host
                                 const publicHlsUrl = '<%= mediamtx.public_hls_url %>';
-                                const baseUrl = publicHlsUrl || (window.location.origin + '/hls');
+                                const baseUrl = publicHlsUrl || (window.location.protocol + '//' + window.location.hostname + ':' + hlsPort);
                                 const transcodedSrc = baseUrl + '/cam_' + cam.id + '/index.m3u8';
                                 const fallbackSrc = baseUrl + '/cam_' + cam.id + '_input/index.m3u8';
 
