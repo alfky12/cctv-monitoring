@@ -119,6 +119,35 @@
         .date-filter:focus {
             border-color: #10b981;
         }
+
+        @media (max-width: 640px) {
+            .timeline-container {
+                height: 44px;
+            }
+            .timeline-track {
+                height: 3px;
+            }
+            .timeline-cursor {
+                width: 3px;
+                top: 8%;
+                bottom: 8%;
+            }
+            .timeline-time {
+                font-size: 9px;
+                bottom: 0;
+            }
+            .timeline-segment {
+                top: 18%;
+                height: 64%;
+            }
+            .timeline-tooltip {
+                display: none;
+            }
+            .timeline-time:nth-of-type(2),
+            .timeline-time:nth-of-type(4) {
+                display: none;
+            }
+        }
     </style>
 </head>
 
@@ -195,17 +224,27 @@
                         </svg>
                         Timeline Rekaman
                     </h3>
-                    <div class="flex gap-2">
-                        <input type="date" id="dateFilter" class="date-filter" onchange="filterByDate()"
+                    <div class="flex gap-2 flex-wrap justify-end">
+                        <input type="date" id="dateFilter" class="date-filter w-full sm:w-auto" onchange="filterByDate()"
                             value="<%= typeof filterDate !== 'undefined' ? filterDate : '' %>">
-                        <select id="cameraFilter" class="date-filter" onchange="filterByCamera()">
+                        <select id="cameraFilter" class="date-filter w-full sm:w-auto" onchange="filterByCamera()">
                             <option value="">Semua Kamera</option>
-                            <% const folderNames=[...new Set(recordings.map(r=> r.camera_folder || r.camera_name))]; %>
-                                <% folderNames.forEach(function(name) { %>
-                                    <option value="<%= name %>">
-                                        <%= name %>
-                                    </option>
-                                    <% }); %>
+                            <% 
+                                const cameraPairs = [];
+                                const seenKeys = new Set();
+                                (recordings || []).forEach(function(r) {
+                                    var val = r.camera_folder || r.camera_name;
+                                    var labelCam = r.camera_name || val;
+                                    var labelFolder = r.camera_folder || val;
+                                    if (!seenKeys.has(val)) {
+                                        seenKeys.add(val);
+                                        cameraPairs.push({ value: val, label: labelFolder + ' — ' + labelCam });
+                                    }
+                                });
+                                cameraPairs.forEach(function(item) { 
+                            %>
+                                <option value="<%= item.value %>"><%= item.label %></option>
+                            <% }); %>
                         </select>
                     </div>
                 </div>
@@ -235,12 +274,12 @@
                     <table class="w-full text-left border-collapse" id="recordingsTable">
                         <thead>
                             <tr class="bg-gray-900 text-gray-400 text-sm uppercase tracking-wider">
+                                <th class="p-4 font-semibold border-b border-gray-700 text-center">Aksi</th>
                                 <th class="p-4 font-semibold border-b border-gray-700 w-1/4">Kamera</th>
                                 <th class="p-4 font-semibold border-b border-gray-700">Nama File</th>
                                 <th class="p-4 font-semibold border-b border-gray-700">Waktu Rekam</th>
                                 <th class="p-4 font-semibold border-b border-gray-700">Durasi</th>
                                 <th class="p-4 font-semibold border-b border-gray-700">Ukuran</th>
-                                <th class="p-4 font-semibold border-b border-gray-700 text-center">Aksi</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-700" id="recordingsBody">
@@ -248,6 +287,18 @@
                                 <tr class="table-row-hover transition duration-150 recording-row"
                                     data-camera="<%= rec.camera_folder || rec.camera_name %>" data-time="<%= rec.created_at_iso || rec.created_at %>"
                                     data-file="/<%= rec.file_path %>">
+                                    <td class="p-4 text-center flex justify-center gap-2">
+                                        <button
+                                            onclick="playVideo('/<%= rec.file_path %>', '<%= rec.camera_name %>', '<%= rec.created_at %>')"
+                                            class="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded transition"
+                                            title="Putar">
+                                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                                <path
+                                                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z">
+                                                </path>
+                                            </svg>
+                                        </button>
+                                    </td>
                                     <td class="p-4 font-medium text-white">
                                         <%= rec.camera_name %>
                                     </td>
@@ -262,18 +313,6 @@
                                     </td>
                                     <td class="p-4 text-gray-500 text-sm">
                                         <%= (rec.size / (1024 * 1024)).toFixed(2) %> MB
-                                    </td>
-                                    <td class="p-4 text-center flex justify-center gap-2">
-                                        <button
-                                            onclick="playVideo('/<%= rec.file_path %>', '<%= rec.camera_name %>', '<%= rec.created_at %>')"
-                                            class="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded transition"
-                                            title="Putar">
-                                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                                                <path
-                                                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z">
-                                                </path>
-                                            </svg>
-                                        </button>
                                     </td>
                                 </tr>
                                 <% }); %>
@@ -478,7 +517,7 @@
                     matchDate = recDate === filterDate;
                 }
                 if (cameraFilter) {
-                    matchCamera = rec.camera_name === cameraFilter;
+                    matchCamera = (rec.camera_folder || rec.camera_name) === cameraFilter;
                 }
                 return matchDate && matchCamera;
             });
@@ -537,12 +576,16 @@
             player.onloadedmetadata = null;
         }
 
-        function seekTimeline(event) {
-            // Basic implementation for cursor update only since we can't seek across multiple files easily in this logic
+        function updateTimelineCursorFromClientX(x) {
             const timeline = document.getElementById('timeline');
+            if (!timeline) return;
             const rect = timeline.getBoundingClientRect();
-            const percent = (event.clientX - rect.left) / rect.width;
+            const percent = Math.max(0, Math.min(1, (x - rect.left) / rect.width));
             document.getElementById('timelineCursor').style.left = (percent * 100) + '%';
+        }
+
+        function seekTimeline(event) {
+            updateTimelineCursorFromClientX(event.clientX);
         }
 
         function closeModal() {
@@ -575,6 +618,21 @@
                 }
             });
         }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const tl = document.getElementById('timeline');
+            if (!tl) return;
+            tl.addEventListener('touchstart', function (e) {
+                if (e.touches && e.touches.length) {
+                    updateTimelineCursorFromClientX(e.touches[0].clientX);
+                }
+            }, { passive: true });
+            tl.addEventListener('touchmove', function (e) {
+                if (e.touches && e.touches.length) {
+                    updateTimelineCursorFromClientX(e.touches[0].clientX);
+                }
+            }, { passive: true });
+        });
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') closeModal();

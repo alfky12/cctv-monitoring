@@ -79,6 +79,27 @@
                 height: 600px;
             }
         }
+        .camera-marker {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border: 2px solid #064e3b;
+            box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .camera-marker:hover {
+            transform: scale(1.06);
+            box-shadow: 0 10px 20px rgba(16, 185, 129, 0.45);
+        }
+        .camera-marker svg {
+            width: 18px;
+            height: 18px;
+        }
 
         /* Mobile: tombol fullscreen/snapshot selalu terlihat (no hover di touch) */
         .cam-action-btn {
@@ -673,9 +694,38 @@
                         maxZoom: 19
                     }).addTo(map);
 
+                    function makeCameraIconVariant(online, mode) {
+                        var grad = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+                        var border = '#064e3b';
+                        var shadow = 'rgba(16, 185, 129, 0.35)';
+                        if (online === false) {
+                            grad = 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)';
+                            border = '#374151';
+                            shadow = 'rgba(107, 114, 128, 0.35)';
+                        } else if (mode === 'transcoded') {
+                            grad = 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)';
+                            border = '#1e40af';
+                            shadow = 'rgba(59, 130, 246, 0.35)';
+                        } else if (mode === 'direct') {
+                            grad = 'linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)';
+                            border = '#0f766e';
+                            shadow = 'rgba(20, 184, 166, 0.35)';
+                        }
+                        return L.divIcon({
+                            className: '',
+                            html: '<div class="camera-marker" style="background:'+grad+';border-color:'+border+';box-shadow:0 6px 16px '+shadow+';"><svg fill="currentColor" viewBox="0 0 24 24"><path d="M4 7a3 3 0 0 1 3-3h2l1.2-1.6A2 2 0 0 1 12 1h4a2 2 0 0 1 1.6.8L19 4h2a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7zm8 9a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg></div>',
+                            iconSize: [34, 34],
+                            iconAnchor: [17, 17],
+                            popupAnchor: [0, -18]
+                        });
+                    }
+
+                    var markersById = {};
+
                     camerasData.forEach(cam => {
                         if (cam.lat && cam.lng) {
-                            const marker = L.marker([cam.lat, cam.lng]).addTo(map);
+                            const marker = L.marker([cam.lat, cam.lng], { icon: makeCameraIconVariant(true, null) }).addTo(map);
+                            markersById[cam.id] = marker;
 
                             // Popup Content with Video Player
                             const popupContent = `
@@ -750,6 +800,26 @@
                                 }
                             });
                         }
+                    });
+
+                    // Fetch status and update marker icons
+                    fetch('/api/status').then(function (res) {
+                        return res.json();
+                    }).then(function (data) {
+                        var cams = (data && data.cameras) || {};
+                        var trans = (data && data.transcode) || {};
+                        camerasData.forEach(function (cam) {
+                            var status = cams[cam.id];
+                            var tstat = trans[cam.id];
+                            var online = status ? !!status.online : null;
+                            var mode = tstat ? tstat.mode : null;
+                            var marker = markersById[cam.id];
+                            if (marker) {
+                                marker.setIcon(makeCameraIconVariant(online, mode));
+                            }
+                        });
+                    }).catch(function () {
+                        // ignore status errors
                     });
                 }
             </script>
