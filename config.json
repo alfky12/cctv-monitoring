@@ -34,7 +34,7 @@
         "resolution": "1080p",
         "frame_rate": "10",
         "bitrate": "1200k",
-        "max_bitrate": "900k",
+        "max_bitrate": "1500k",
         "audio_enabled": "true",
         "audio_bitrate": "64k"
     },

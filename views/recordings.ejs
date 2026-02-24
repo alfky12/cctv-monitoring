@@ -289,7 +289,7 @@
                                         data-file="/<%= rec.file_path %>">
                                         <td class="p-4 text-center flex justify-center gap-2">
                                             <button
-                                                onclick="playVideo('/<%= rec.file_path %>', '<%= rec.camera_name %>', '<%= rec.created_at %>')"
+                                                onclick="playVideo('/<%= rec.file_path %>', '<%= rec.camera_name %>', '<%= rec.created_at_iso || rec.created_at %>')"
                                                 class="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded transition"
                                                 title="Putar">
                                                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">

@@ -124,25 +124,31 @@
             .timeline-container {
                 height: 44px;
             }
+
             .timeline-track {
                 height: 3px;
             }
+
             .timeline-cursor {
                 width: 3px;
                 top: 8%;
                 bottom: 8%;
             }
+
             .timeline-time {
                 font-size: 9px;
                 bottom: 0;
             }
+
             .timeline-segment {
                 top: 18%;
                 height: 64%;
             }
+
             .timeline-tooltip {
                 display: none;
             }
+
             .timeline-time:nth-of-type(2),
             .timeline-time:nth-of-type(4) {
                 display: none;
@@ -191,7 +197,7 @@
                 </h2>
                 <div class="flex items-center gap-3">
                     <span class="text-sm text-gray-500 px-3 py-1 bg-gray-800 rounded-full border border-gray-700">
-                        <%= typeof totalCount !== 'undefined' ? totalCount : recordings.length %> File Tersimpan
+                        <%= typeof totalCount !=='undefined' ? totalCount : recordings.length %> File Tersimpan
                     </span>
                 </div>
             </div>
@@ -199,17 +205,17 @@
                 <span>
                     Menampilkan
                     <%= recordings.length %>
-                    dari
-                    <%= typeof totalCount !== 'undefined' ? totalCount : recordings.length %>
-                    file
+                        dari
+                        <%= typeof totalCount !=='undefined' ? totalCount : recordings.length %>
+                            file
                 </span>
                 <span>
                     Halaman
-                    <%= typeof currentPage !== 'undefined' ? currentPage : 1 %>
-                    /
-                    <%= typeof totalPages !== 'undefined' ? totalPages : 1 %>
-                    •
-                    <%= typeof pageSize !== 'undefined' ? pageSize : recordings.length %> per halaman
+                    <%= typeof currentPage !=='undefined' ? currentPage : 1 %>
+                        /
+                        <%= typeof totalPages !=='undefined' ? totalPages : 1 %>
+                            •
+                            <%= typeof pageSize !=='undefined' ? pageSize : recordings.length %> per halaman
                 </span>
             </div>
 
@@ -225,26 +231,20 @@
                         Timeline Rekaman
                     </h3>
                     <div class="flex gap-2 flex-wrap justify-end">
-                        <input type="date" id="dateFilter" class="date-filter w-full sm:w-auto" onchange="filterByDate()"
+                        <input type="date" id="dateFilter" class="date-filter w-full sm:w-auto"
+                            onchange="filterByDate()"
                             value="<%= typeof filterDate !== 'undefined' ? filterDate : '' %>">
                         <select id="cameraFilter" class="date-filter w-full sm:w-auto" onchange="filterByCamera()">
                             <option value="">Semua Kamera</option>
-                            <% 
-                                const cameraPairs = [];
-                                const seenKeys = new Set();
-                                (recordings || []).forEach(function(r) {
-                                    var val = r.camera_folder || r.camera_name;
-                                    var labelCam = r.camera_name || val;
-                                    var labelFolder = r.camera_folder || val;
-                                    if (!seenKeys.has(val)) {
-                                        seenKeys.add(val);
-                                        cameraPairs.push({ value: val, label: labelFolder + ' — ' + labelCam });
-                                    }
-                                });
-                                cameraPairs.forEach(function(item) { 
-                            %>
-                                <option value="<%= item.value %>"><%= item.label %></option>
-                            <% }); %>
+                            <% const cameraPairs=[]; const seenKeys=new Set(); (recordings || []).forEach(function(r) {
+                                var val=r.camera_folder || r.camera_name; var labelCam=r.camera_name || val; var
+                                labelFolder=r.camera_folder || val; if (!seenKeys.has(val)) { seenKeys.add(val);
+                                cameraPairs.push({ value: val, label: labelFolder + ' — ' + labelCam }); } });
+                                cameraPairs.forEach(function(item) { %>
+                                <option value="<%= item.value %>">
+                                    <%= item.label %>
+                                </option>
+                                <% }); %>
                         </select>
                     </div>
                 </div>
@@ -285,11 +285,12 @@
                         <tbody class="divide-y divide-gray-700" id="recordingsBody">
                             <% recordings.forEach(function(rec) { %>
                                 <tr class="table-row-hover transition duration-150 recording-row"
-                                    data-camera="<%= rec.camera_folder || rec.camera_name %>" data-time="<%= rec.created_at_iso || rec.created_at %>"
+                                    data-camera="<%= rec.camera_folder || rec.camera_name %>"
+                                    data-time="<%= rec.created_at_iso || rec.created_at %>"
                                     data-file="/<%= rec.file_path %>">
                                     <td class="p-4 text-center flex justify-center gap-2">
                                         <button
-                                            onclick="playVideo('/<%= rec.file_path %>', '<%= rec.camera_name %>', '<%= rec.created_at %>')"
+                                            onclick="playVideo('/<%= rec.file_path %>', '<%= rec.camera_name %>', '<%= rec.created_at_iso || rec.created_at %>')"
                                             class="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded transition"
                                             title="Putar">
                                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -306,7 +307,8 @@
                                         <%= rec.filename || rec.file_path %>
                                     </td>
                                     <td class="p-4 text-gray-300">
-                                        <%= new Date(rec.created_at + (rec.created_at.includes('Z') ? '' : 'Z')).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'medium' }) %>
+                                        <%= new Date(rec.created_at_iso || rec.created_at).toLocaleString('id-ID', {
+                                            timeZone: 'Asia/Jakarta' , dateStyle: 'medium' , timeStyle: 'medium' }) %>
                                     </td>
                                     <td class="p-4 text-gray-400 text-sm">
                                         <%= rec.duration ? rec.duration + 's' : '-' %>
@@ -325,31 +327,32 @@
             </div>
             <div class="flex flex-col md:flex-row items-center justify-between gap-3 text-sm text-gray-300">
                 <div class="flex items-center gap-2">
-                    <% const sizeParam = (typeof pageSize !== 'undefined' ? pageSize : 200); %>
-                    <% const dateParam = (typeof filterDate !== 'undefined' ? filterDate : ''); %>
-                    <% const pageParam = (typeof currentPage !== 'undefined' ? currentPage : 1); %>
-                    <% const totalPagesParam = (typeof totalPages !== 'undefined' ? totalPages : 1); %>
-                    <% const prevPage = Math.max(1, pageParam - 1); %>
-                    <% const nextPage = Math.min(totalPagesParam, pageParam + 1); %>
-                    <% const baseQuery = `size=${sizeParam}` + (dateParam ? `&date=${dateParam}` : ''); %>
-                    <a href="/archive?<%= baseQuery %>&page=<%= prevPage %>"
-                        class="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded border border-gray-700 <%= pageParam <= 1 ? 'opacity-50 pointer-events-none' : '' %>">
-                        Sebelumnya
-                    </a>
-                    <a href="/archive?<%= baseQuery %>&page=<%= nextPage %>"
-                        class="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded border border-gray-700 <%= pageParam >= totalPagesParam ? 'opacity-50 pointer-events-none' : '' %>">
-                        Berikutnya
-                    </a>
+                    <% const sizeParam=(typeof pageSize !=='undefined' ? pageSize : 200); %>
+                        <% const dateParam=(typeof filterDate !=='undefined' ? filterDate : '' ); %>
+                            <% const pageParam=(typeof currentPage !=='undefined' ? currentPage : 1); %>
+                                <% const totalPagesParam=(typeof totalPages !=='undefined' ? totalPages : 1); %>
+                                    <% const prevPage=Math.max(1, pageParam - 1); %>
+                                        <% const nextPage=Math.min(totalPagesParam, pageParam + 1); %>
+                                            <% const baseQuery=`size=${sizeParam}` + (dateParam ? `&date=${dateParam}`
+                                                : '' ); %>
+                                                <a href="/archive?<%= baseQuery %>&page=<%= prevPage %>"
+                                                    class="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded border border-gray-700 <%= pageParam <= 1 ? 'opacity-50 pointer-events-none' : '' %>">
+                                                    Sebelumnya
+                                                </a>
+                                                <a href="/archive?<%= baseQuery %>&page=<%= nextPage %>"
+                                                    class="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded border border-gray-700 <%= pageParam >= totalPagesParam ? 'opacity-50 pointer-events-none' : '' %>">
+                                                    Berikutnya
+                                                </a>
                 </div>
                 <div class="flex items-center gap-2">
                     <span>Per halaman:</span>
-                    <% const sizes = [100, 200, 300, 500]; %>
-                    <% sizes.forEach(function(s) { %>
-                        <a href="/archive?<%= (dateParam ? `date=${dateParam}&` : '') %>size=<%= s %>&page=1"
-                            class="px-3 py-1 rounded border border-gray-700 <%= sizeParam === s ? 'bg-green-600 text-white' : 'bg-gray-800 hover:bg-gray-700' %>">
-                            <%= s %>
-                        </a>
-                    <% }); %>
+                    <% const sizes=[100, 200, 300, 500]; %>
+                        <% sizes.forEach(function(s) { %>
+                            <a href="/archive?<%= (dateParam ? `date=${dateParam}&` : '') %>size=<%= s %>&page=1"
+                                class="px-3 py-1 rounded border border-gray-700 <%= sizeParam === s ? 'bg-green-600 text-white' : 'bg-gray-800 hover:bg-gray-700' %>">
+                                <%= s %>
+                            </a>
+                            <% }); %>
                 </div>
             </div>
         </div>
@@ -378,15 +381,20 @@
                         </select>
                     </div>
                     <div class="flex items-center gap-2">
-                        <button onclick="event.stopPropagation(); toggleModalFullscreen();" class="min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-400 hover:text-white p-2 rounded touch-manipulation" title="Fullscreen">
+                        <button onclick="event.stopPropagation(); toggleModalFullscreen();"
+                            class="min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-400 hover:text-white p-2 rounded touch-manipulation"
+                            title="Fullscreen">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4m-4 0l5 5m5-5l-5 5M4 16v4m0 0h4m-4 0l5-5m-5 5l5-5m-5 5v-4m0 4h-4"></path>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 8V4m0 0h4m-4 0l5 5m5-5l-5 5M4 16v4m0 0h4m-4 0l5-5m-5 5l5-5m-5 5v-4m0 4h-4">
+                                </path>
                             </svg>
                         </button>
                         <button onclick="closeModal()"
                             class="min-w-[44px] min-h-[44px] flex items-center gap-2 justify-center bg-red-600 hover:bg-red-700 text-white p-2 rounded touch-manipulation">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M6 18L18 6M6 6l12 12">
                                 </path>
                             </svg>
                             <span class="hidden sm:inline text-xs font-semibold">TUTUP</span>
@@ -557,7 +565,7 @@
             player.src = url;
             modal.style.display = 'flex';
             document.getElementById('videoTitle').textContent = cameraName;
-            document.getElementById('videoInfo').textContent = new Date(createdAt).toLocaleString('id-ID');
+            document.getElementById('videoInfo').textContent = new Date(createdAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
 
             const rateSelect = document.getElementById('playbackRateSelectPublic');
             if (rateSelect) {
@@ -597,9 +605,9 @@
 
         function lockLandscapeInFullscreen() {
             if (document.fullscreenElement && screen.orientation && screen.orientation.lock) {
-                screen.orientation.lock('landscape').catch(function () {});
+                screen.orientation.lock('landscape').catch(function () { });
             } else if (!document.fullscreenElement && screen.orientation && screen.orientation.unlock) {
-                screen.orientation.unlock().catch(function () {});
+                screen.orientation.unlock().catch(function () { });
             }
         }
         document.addEventListener('fullscreenchange', lockLandscapeInFullscreen);

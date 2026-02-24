@@ -32,7 +32,7 @@ function normalizeHostValue(value) {
             const url = new URL(host);
             return url.hostname || '';
         }
-    } catch (e) {}
+    } catch (e) { }
     host = host.split('/')[0];
     if (host.includes(':')) {
         host = host.split(':')[0];
@@ -111,6 +111,7 @@ app.locals.hls_port = config.mediamtx?.hls_port || 8856;
 
 let cameraStatus = {};
 let diskUsage = { total: 0, used: 0, percent: 0 };
+let recordingUsageCache = { totalBytes: 0, totalFiles: 0, lastUpdate: 0 };
 let diskCriticalAlerted = false;
 let mediaMtxErrorNotified = false;
 let loginAttempts = {};
@@ -166,19 +167,17 @@ function getRecordingsFromFilesystem(selectedDate) {
             }
             if (!stats.isFile()) return;
 
-            const match = file.match(/(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/);
-            let createdAt;
-            if (match) {
-                const iso = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}+07:00`;
-                const parsed = new Date(iso);
-                createdAt = isNaN(parsed.getTime()) ? formatDateJakarta(stats.mtime) : formatDateJakarta(parsed);
-            } else {
-                createdAt = formatDateJakarta(stats.mtime);
-            }
+            // Only include video files
+            const videoExtensions = ['.mp4', '.fmp4', '.ts', '.mkv'];
+            const ext = path.extname(file).toLowerCase();
+            if (!videoExtensions.includes(ext)) return;
+
+            // Use file mtime (server local time via TZ env) — more reliable than parsing filename
+            const createdAt = formatDateJakarta(stats.mtime);
 
             if (selectedDate && !createdAt.startsWith(selectedDate)) return;
 
-            const createdAtIso = createdAt.replace(' ', 'T') + '+07:00';
+            const createdAtIso = stats.mtime.toISOString();
             const relativePath = path.join('recordings', folder, file).replace(/\\/g, '/');
             items.push({
                 camera_id: cameraId,
@@ -342,7 +341,7 @@ const sessionMiddleware = session({
 app.use((req, res, next) => {
     // Detect if the current request is secure (HTTPS or Cloudflare HTTPS)
     const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
-    
+
     // Update cookie secure flag dynamically based on request if needed, 
     // but usually setting it in config is enough. 
     // Here we use the pre-initialized middleware.
@@ -494,50 +493,86 @@ async function updateMediaMtxRecording() {
 }
 
 async function updateSystemHealth() {
-    // 1. Check Disk Usage
     const { exec } = require('child_process');
     const isWin = process.platform === 'win32';
+    const path = require('path');
+    const fs = require('fs');
 
     if (isWin) {
-        // Check Disk Usage (Windows)
-        exec("wmic logicaldisk where \"DeviceID='C:'\" get Size,FreeSpace /value", (err, stdout) => {
+        exec("wmic logicaldisk get DeviceID,Size,FreeSpace /value", (err, stdout) => {
             if (!err) {
-                const lines = stdout.trim().split('\n');
-                let size = 0, freeSpace = 0;
-                lines.forEach(line => {
-                    if (line.startsWith('Size=')) size = parseInt(line.split('=')[1]) || 0;
-                    if (line.startsWith('FreeSpace=')) freeSpace = parseInt(line.split('=')[1]) || 0;
-                });
-                const used = size - freeSpace;
-                const percent = size > 0 ? Math.round((used / size) * 100) : 0;
-
+                const blocks = stdout.trim().split(/\n\s*\n/);
+                const disks = [];
                 const formatBytes = (bytes) => {
-                    if (bytes === 0) return '0 B';
+                    if (!bytes || bytes === 0) return '0 B';
                     const k = 1024;
                     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
                     const i = Math.floor(Math.log(bytes) / Math.log(k));
                     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
                 };
-
+                blocks.forEach(block => {
+                    const kv = {};
+                    block.split('\n').forEach(line => {
+                        const [key, val] = line.split('=');
+                        if (key && val) kv[key.trim()] = val.trim();
+                    });
+                    const size = parseInt(kv.Size) || 0;
+                    const freeSpace = parseInt(kv.FreeSpace) || 0;
+                    const used = size - freeSpace;
+                    const percent = size > 0 ? Math.round((used / size) * 100) : 0;
+                    if (kv.DeviceID) {
+                        disks.push({
+                            mounted: kv.DeviceID,
+                            total: formatBytes(size),
+                            used: formatBytes(used),
+                            free: formatBytes(freeSpace),
+                            percent
+                        });
+                    }
+                });
+                const sysDrive = process.env.SystemDrive || 'C:';
+                const summary = disks.find(d => d.mounted === sysDrive) || disks[0] || { total: '0 B', used: '0 B', free: '0 B', percent: 0, mounted: sysDrive };
+                const osmod = require('os');
+                const totalMem = osmod.totalmem();
+                const freeMem = osmod.freemem();
+                const usedMem = totalMem - freeMem;
+                const memPercent = totalMem > 0 ? Math.round((usedMem / totalMem) * 100) : 0;
                 diskUsage = {
-                    total: formatBytes(size),
-                    used: formatBytes(used),
-                    free: formatBytes(freeSpace),
-                    percent: percent,
-                    mounted: 'C:'
+                    total: summary.total,
+                    used: summary.used,
+                    free: summary.free,
+                    percent: summary.percent,
+                    mounted: summary.mounted,
+                    disks,
+                    memory: {
+                        total: formatBytes(totalMem),
+                        used: formatBytes(usedMem),
+                        free: formatBytes(freeMem),
+                        percent: memPercent
+                    },
+                    cpu: {
+                        load1: null,
+                        load5: null,
+                        load15: null
+                    },
+                    uptime_sec: osmod.uptime()
                 };
+                exec('wmic /namespace:\\\\root\\wmi PATH MSAcpi_ThermalZoneTemperature get CurrentTemperature', (terr, tout) => {
+                    if (!terr) {
+                        const vals = tout.split('\n').map(s => parseInt(s.trim())).filter(v => !isNaN(v) && v > 0);
+                        if (vals.length > 0) {
+                            const avgKelvinTimes10 = vals.reduce((a, b) => a + b, 0) / vals.length;
+                            const celsius = (avgKelvinTimes10 / 10) - 273.15;
+                            diskUsage.sensors = diskUsage.sensors || {};
+                            diskUsage.sensors.cpu_temp_c = Math.round(celsius * 10) / 10;
+                        }
+                    }
+                });
 
-                if (diskUsage.percent > 90) {
+                if (summary.percent > 90) {
                     if (!diskCriticalAlerted) {
-                        sendTelegramMessage(`⚠️ <b>CRITICAL STORAGE</b>\nDisk usage is at <b>${diskUsage.percent}%</b> (${diskUsage.used}/${diskUsage.total}). Segment cleanup might be needed.`);
-
-                        // Send push notification for critical storage
-                        sendPushNotification(
-                            '⚠️ Critical Storage Alert',
-                            `Disk usage is at ${diskUsage.percent}%. Cleanup needed!`,
-                            '/admin/recordings'
-                        );
-
+                        sendTelegramMessage(`⚠️ <b>CRITICAL STORAGE</b>\nDisk usage is at <b>${summary.percent}%</b> (${summary.used}/${summary.total}). Segment cleanup might be needed.`);
+                        sendPushNotification('⚠️ Critical Storage Alert', `Disk usage is at ${summary.percent}%. Cleanup needed!`, '/admin/recordings');
                         diskCriticalAlerted = true;
                     }
                 } else {
@@ -546,30 +581,79 @@ async function updateSystemHealth() {
             }
         });
     } else {
-        // Check Disk Usage (Linux)
-        exec('df -h / | tail -1', (err, stdout) => {
+        exec('df -hP | tail -n +2', (err, stdout) => {
             if (!err) {
-                const parts = stdout.trim().split(/\s+/);
-                // Filesystem Size Used Avail Use% Mounted
-                diskUsage = {
-                    total: parts[1],
-                    used: parts[2],
-                    free: parts[3],
-                    percent: parseInt(parts[4]),
-                    mounted: parts[5]
+                const lines = stdout.trim().split('\n');
+                const disks = [];
+                lines.forEach(line => {
+                    const parts = line.trim().split(/\s+/);
+                    if (parts.length >= 6) {
+                        disks.push({
+                            filesystem: parts[0],
+                            total: parts[1],
+                            used: parts[2],
+                            free: parts[3],
+                            percent: parseInt(parts[4]),
+                            mounted: parts[5]
+                        });
+                    }
+                });
+                const summary = disks.find(d => d.mounted === '/') || disks[0] || { total: '0', used: '0', free: '0', percent: 0, mounted: '/' };
+                const osmod = require('os');
+                const totalMem = osmod.totalmem();
+                const freeMem = osmod.freemem();
+                const usedMem = totalMem - freeMem;
+                const formatBytes = (bytes) => {
+                    if (!bytes || bytes === 0) return '0 B';
+                    const k = 1024;
+                    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
                 };
+                const memPercent = totalMem > 0 ? Math.round((usedMem / totalMem) * 100) : 0;
+                const load = osmod.loadavg();
+                diskUsage = {
+                    total: summary.total,
+                    used: summary.used,
+                    free: summary.free,
+                    percent: summary.percent,
+                    mounted: summary.mounted,
+                    disks,
+                    memory: {
+                        total: formatBytes(totalMem),
+                        used: formatBytes(usedMem),
+                        free: formatBytes(freeMem),
+                        percent: memPercent
+                    },
+                    cpu: {
+                        load1: load[0],
+                        load5: load[1],
+                        load15: load[2]
+                    },
+                    uptime_sec: osmod.uptime()
+                };
+                try {
+                    const zones = fs.readdirSync('/sys/class/thermal').filter(n => /^thermal_zone/.test(n));
+                    const temps = [];
+                    zones.forEach(z => {
+                        const tpath = path.join('/sys/class/thermal', z, 'temp');
+                        try {
+                            const t = fs.readFileSync(tpath, 'utf8').trim();
+                            const val = parseInt(t);
+                            if (!isNaN(val) && val > 0) temps.push(val / 1000);
+                        } catch (e) { }
+                    });
+                    if (temps.length > 0) {
+                        const avg = temps.reduce((a, b) => a + b, 0) / temps.length;
+                        diskUsage.sensors = diskUsage.sensors || {};
+                        diskUsage.sensors.cpu_temp_c = Math.round(avg * 10) / 10;
+                    }
+                } catch (e) { }
 
-                if (diskUsage.percent > 90) {
+                if (summary.percent > 90) {
                     if (!diskCriticalAlerted) {
-                        sendTelegramMessage(`⚠️ <b>CRITICAL STORAGE</b>\nDisk usage is at <b>${diskUsage.percent}%</b> (${diskUsage.used}/${diskUsage.total}). Segment cleanup might be needed.`);
-
-                        // Send push notification for critical storage
-                        sendPushNotification(
-                            '⚠️ Critical Storage Alert',
-                            `Disk usage is at ${diskUsage.percent}%. Cleanup needed!`,
-                            '/admin/recordings'
-                        );
-
+                        sendTelegramMessage(`⚠️ <b>CRITICAL STORAGE</b>\nDisk usage is at <b>${summary.percent}%</b> (${summary.used}/${summary.total}). Segment cleanup might be needed.`);
+                        sendPushNotification('⚠️ Critical Storage Alert', `Disk usage is at ${summary.percent}%. Cleanup needed!`, '/admin/recordings');
                         diskCriticalAlerted = true;
                     }
                 } else {
@@ -578,6 +662,51 @@ async function updateSystemHealth() {
             }
         });
     }
+
+    try {
+        const nowMs = Date.now();
+        if (!recordingUsageCache.lastUpdate || (nowMs - recordingUsageCache.lastUpdate) > 120000) {
+            const recordingsDir = path.join(__dirname, 'recordings');
+            let totalBytes = 0;
+            let totalFiles = 0;
+            if (fs.existsSync(recordingsDir)) {
+                const camFolders = fs.readdirSync(recordingsDir).filter(f => {
+                    try {
+                        const p = path.join(recordingsDir, f);
+                        return fs.statSync(p).isDirectory();
+                    } catch (e) { return false; }
+                });
+                camFolders.forEach(f => {
+                    const fp = path.join(recordingsDir, f);
+                    let files = [];
+                    try { files = fs.readdirSync(fp); } catch (e) { files = []; }
+                    files.forEach(fn => {
+                        const full = path.join(fp, fn);
+                        try {
+                            const st = fs.statSync(full);
+                            if (st.isFile()) {
+                                totalBytes += st.size;
+                                totalFiles += 1;
+                            }
+                        } catch (e) { }
+                    });
+                });
+            }
+            recordingUsageCache = { totalBytes, totalFiles, lastUpdate: nowMs };
+        }
+        const formatBytesRec = (bytes) => {
+            if (!bytes || bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        };
+        diskUsage.recordings = {
+            total: formatBytesRec(recordingUsageCache.totalBytes),
+            files: recordingUsageCache.totalFiles,
+            lastUpdate: new Date(recordingUsageCache.lastUpdate).toISOString()
+        };
+    } catch (e) { }
 
     // 2. Check Camera Health via MediaMTX Runtime API
     try {
@@ -1001,8 +1130,8 @@ app.post('/api/settings', requireApiAuth, (req, res) => {
 // Update Recording Settings
 app.post('/api/settings/recording', requireApiAuth, (req, res) => {
     const { enabled, start_time, end_time, segment_duration, delete_after,
-            video_codec, resolution, frame_rate, bitrate, max_bitrate,
-            audio_enabled, audio_bitrate } = req.body;
+        video_codec, resolution, frame_rate, bitrate, max_bitrate,
+        audio_enabled, audio_bitrate } = req.body;
 
     config.recording = {
         enabled: enabled === 'true' || enabled === true,
@@ -1023,10 +1152,10 @@ app.post('/api/settings/recording', requireApiAuth, (req, res) => {
     fs.writeFile(path.join(__dirname, 'config.json'), JSON.stringify(config, null, 4), (err) => {
         if (err) return res.status(500).json({ error: 'Failed save' });
         app.locals.recording = config.recording;
-        
+
         // Apply recording path configs (record=true/false)
-        updateMediaMtxRecording(); 
-        
+        updateMediaMtxRecording();
+
         // Restart all cameras to apply transcoding settings (bitrate/resolution)
         // This forces smart_transcode.sh to restart with new config
         console.log('Reloading all cameras to apply new recording/transcoding settings...');
@@ -1041,17 +1170,17 @@ app.get('/api/status', (req, res) => {
     // Get all cameras to ensure we return status for everyone
     db.all("SELECT id FROM cameras", [], async (err, rows) => {
         let currentStatus = {};
-        
+
         // If DB fails, fallback to what we have in memory
         if (err || !rows) {
             currentStatus = { ...cameraStatus };
         } else {
             // Build status for all known cameras
             rows.forEach(cam => {
-                currentStatus[cam.id] = cameraStatus[cam.id] || { 
-                    online: false, 
-                    lastUpdate: null, 
-                    hasBeenChecked: false 
+                currentStatus[cam.id] = cameraStatus[cam.id] || {
+                    online: false,
+                    lastUpdate: null,
+                    hasBeenChecked: false
                 };
             });
         }
@@ -1395,8 +1524,16 @@ app.post('/api/rtsp-generate', (req, res) => {
     });
 });
 
-// Recording Notification from MediaMTX
+// Recording Notification from MediaMTX (localhost only)
 app.post('/api/recordings/notify', (req, res) => {
+    // Security: only accept from localhost (record_notify.sh runs locally)
+    const clientIp = req.ip || req.connection.remoteAddress || '';
+    const allowedIps = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
+    if (!allowedIps.includes(clientIp)) {
+        console.warn(`[Security] Blocked recording notify from unauthorized IP: ${clientIp}`);
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+
     const { path: mtxPath, file } = req.body;
     console.log(`New recording segment: ${file} for path ${mtxPath}`);
 
@@ -1729,13 +1866,13 @@ function scanExistingRecordings() {
 
                     try {
                         const files = fs.readdirSync(folderPath).filter(f => {
-                            return f.endsWith('.mp4') || f.endsWith('.ts') || f.endsWith('.mkv');
+                            return f.endsWith('.mp4') || f.endsWith('.fmp4') || f.endsWith('.ts') || f.endsWith('.mkv');
                         });
 
                         files.forEach(filename => {
                             const filePath = path.join(folderPath, filename);
                             const relativePath = path.relative(__dirname, filePath).replace(/\\/g, '/');
-                            
+
                             totalFilesFound++;
 
                             if (!existingFiles.has(relativePath)) {
@@ -1761,7 +1898,7 @@ function scanExistingRecordings() {
                 db.run('COMMIT', (err) => {
                     if (err) console.error('Transaction commit failed:', err.message);
                     stmt.finalize();
-                    
+
                     if (importedCount > 0) {
                         console.log(`✅ Imported ${importedCount} new recording(s) to database (Total found: ${totalFilesFound})`);
                     } else {
@@ -1777,11 +1914,30 @@ function scanExistingRecordings() {
 }
 
 // --- System Update API ---
- 
+
 
 app.listen(PORT, () => {
 
     console.log(`Server is running on http://localhost:${PORT}`);
+
+    // Pre-initialize cameraStatus so Telegram /status has data immediately
+    db.all("SELECT id FROM cameras", [], (err, rows) => {
+        if (!err && rows) {
+            rows.forEach((cam) => {
+                if (!cameraStatus[cam.id]) {
+                    cameraStatus[cam.id] = {
+                        online: false,
+                        lastUpdate: null,
+                        hasBeenChecked: false,
+                        offlineSince: null,
+                        offlineAlertSent: false,
+                        hlsReady: false,
+                        hlsTranscoded: false
+                    };
+                }
+            });
+        }
+    });
 
     // Initialize Telegram Bot
     telegramBot.init(config, db, {
@@ -1831,7 +1987,7 @@ app.listen(PORT, () => {
 function telegramRestartSystem() {
     const { exec } = require('child_process');
     console.log('[System] Restart requested via Telegram');
-    
+
     // Notify first
     setTimeout(() => {
         if (process.platform === 'linux') {
@@ -1853,10 +2009,10 @@ function telegramDeleteOldRecordings(days, callback) {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - days);
     const dateStr = cutoffDate.toISOString().replace('T', ' ').substring(0, 19);
-    
+
     db.all("SELECT id, file_path, size FROM recordings WHERE created_at < ?", [dateStr], (err, rows) => {
         if (err) return callback({ error: err.message });
-        
+
         if (!rows || rows.length === 0) return callback({ deleted: 0, freedSpace: '0 MB' });
 
         let deletedCount = 0;
@@ -1868,7 +2024,7 @@ function telegramDeleteOldRecordings(days, callback) {
             if (fs.existsSync(fullPath)) {
                 try {
                     fs.unlinkSync(fullPath);
-                } catch(e) { console.error('Delete file error:', e.message); }
+                } catch (e) { console.error('Delete file error:', e.message); }
             }
             deletedCount++;
             freedBytes += row.size || 0;

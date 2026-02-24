@@ -1,4 +1,5 @@
 #!/bin/bash
+export TZ=Asia/Jakarta
 echo "Starting CCTV Monitoring System..."
 
 # Check if node_modules exists
@@ -16,7 +17,7 @@ else
     # Optional: try to start it if in current dir
     if [ -f "./mediamtx" ]; then
         echo "Starting MediaMTX..."
-        ./mediamtx &
+        ./mediamtx ./mediamtx.yml &
         sleep 2
     fi
 fi

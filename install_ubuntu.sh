@@ -132,28 +132,37 @@ echo "[$(date)] Detected video codec: '$VIDEO_CODEC'" >> "$LOG_FILE"
 echo "[$(date)] Config codec: '$VIDEO_CODEC_CONFIG', Resolution: '$RESOLUTION_CONFIG', FPS: $VIDEO_FPS, Bitrate: $VIDEO_BITRATE" >> "$LOG_FILE"
 
 # Build FFmpeg command
-FFMPEG_CMD="ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i \"$SOURCE_RTSP\""
+FFMPEG_CMD="ffmpeg -hide_banner -loglevel error -fflags +genpts -analyzeduration 10M -probesize 10M -flags +discardcorrupt -fps_mode passthrough -rtsp_transport tcp -i \"$SOURCE_RTSP\""
 
-# Video codec
-if [ "$VIDEO_CODEC_CONFIG" = "h265" ] || [ "$VIDEO_CODEC_CONFIG" = "hevc" ]; then
-    FFMPEG_CMD="$FFMPEG_CMD -c:v libx265 -preset ultrafast -tune zerolatency -profile:v main"
+# Smart codec selection: copy H.264, transcode H.265/others
+if [ "$VIDEO_CODEC" = "h264" ]; then
+    # Camera already H.264 — copy mode (zero CPU!)
+    echo "[$(date)] H.264 detected, using COPY mode (no transcoding)" >> "$LOG_FILE"
+    FFMPEG_CMD="$FFMPEG_CMD -c:v copy"
+
+    # Audio: copy if available
+    if [ "$AUDIO_ENABLED_CONFIG" = "true" ]; then
+        FFMPEG_CMD="$FFMPEG_CMD -c:a copy"
+    fi
 else
+    # H.265/HEVC or unknown — transcode to H.264
+    echo "[$(date)] Non-H.264 detected ($VIDEO_CODEC), transcoding to H.264" >> "$LOG_FILE"
     FFMPEG_CMD="$FFMPEG_CMD -c:v libx264 -preset ultrafast -tune zerolatency -profile:v main -level 4.0 -pix_fmt yuv420p"
-fi
 
-# Video settings
-FFMPEG_CMD="$FFMPEG_CMD -s \"$RESOLUTION\" -b:v \"$VIDEO_BITRATE\" -maxrate \"$MAX_VIDEO_BITRATE\" -bufsize \"$VIDEO_BUF_SIZE\""
-FFMPEG_CMD="$FFMPEG_CMD -r \"$VIDEO_FPS\" -g \"$GOP_SIZE\" -threads \"$ENC_THREADS\""
+    # Video settings (only when transcoding)
+    FFMPEG_CMD="$FFMPEG_CMD -s \"$RESOLUTION\" -b:v \"$VIDEO_BITRATE\" -maxrate \"$MAX_VIDEO_BITRATE\" -bufsize \"$VIDEO_BUF_SIZE\""
+    FFMPEG_CMD="$FFMPEG_CMD -r \"$VIDEO_FPS\" -g \"$GOP_SIZE\" -threads \"$ENC_THREADS\""
 
-# Audio settings
-if [ "$AUDIO_ENABLED_CONFIG" = "true" ]; then
-    FFMPEG_CMD="$FFMPEG_CMD -c:a aac -ac 1 -ar 44100 -b:a \"$AUDIO_BITRATE_CONFIG\""
+    # Audio settings
+    if [ "$AUDIO_ENABLED_CONFIG" = "true" ]; then
+        FFMPEG_CMD="$FFMPEG_CMD -c:a aac -ac 1 -ar 44100 -b:a \"$AUDIO_BITRATE_CONFIG\""
+    fi
 fi
 
 # Output
 FFMPEG_CMD="$FFMPEG_CMD -f rtsp -rtsp_transport tcp \"$TARGET_RTSP\""
 
-echo "[$(date)] Transcoding $MTX_PATH with codec: $VIDEO_CODEC_CONFIG, resolution: $RESOLUTION, fps: $VIDEO_FPS, bitrate: $VIDEO_BITRATE..." >> "$LOG_FILE"
+echo "[$(date)] Processing $MTX_PATH — detected: $VIDEO_CODEC, config: $VIDEO_CODEC_CONFIG, resolution: $RESOLUTION, fps: $VIDEO_FPS, bitrate: $VIDEO_BITRATE..." >> "$LOG_FILE"
 eval $FFMPEG_CMD >> "$LOG_FILE" 2>&1
 EOF
 
