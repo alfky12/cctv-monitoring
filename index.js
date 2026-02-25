@@ -876,8 +876,15 @@ app.get('/archive', (req, res) => {
     db.all("SELECT id, nama FROM cameras", [], (errCam, cams) => {
         const cameraNameById = new Map((cams || []).map(cam => [String(cam.id), cam.nama]));
         const normalized = recordings.map(rec => {
-            const name = cameraNameById.get(String(rec.camera_id)) || rec.camera_folder || 'Unknown';
-            return { ...rec, camera_name: name };
+            // Gunakan nama folder sebagai fallback jika kamera sudah dihapus dari DB
+            const folderName = rec.camera_folder || `cam_${rec.camera_id}`;
+            const dbName = cameraNameById.get(String(rec.camera_id));
+            
+            // Prioritas: Nama DB -> Nama Folder
+            // Jika ingin folder sebagai identitas utama saat arsip:
+            const displayName = dbName ? `${dbName} (${folderName})` : folderName;
+            
+            return { ...rec, camera_name: displayName };
         });
         res.render('public_recordings', {
             recordings: normalized,
