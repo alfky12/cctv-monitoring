@@ -11,7 +11,7 @@ if errorlevel 1 (
     exit /b 0
 )
 
-:: Read config values
+:: Read config values - defaults
 set CONFIG_FILE=%~dp0config.json
 set RTSP_PORT=8555
 set VIDEO_BITRATE=800k
@@ -20,14 +20,84 @@ set VIDEO_FPS=12
 set AUDIO_ENABLED=true
 set AUDIO_BITRATE=64k
 set RESOLUTION=1280:720
+set VIDEO_CODEC_CONFIG=h264
+set RESOLUTION_CONFIG=720p
 
-:: Try to read RTSP port from config
+:: Read RTSP port from config
 for /f "tokens=2 delims=:" %%a in ('findstr "rtsp_port" "%CONFIG_FILE%" 2^>nul') do (
     set "val=%%a"
     set "val=!val: =!"
     set "val=!val:,=!"
     set "val=!val:"=!"
     if not "!val!"=="" set RTSP_PORT=!val!
+)
+
+:: Read bitrate from config
+for /f "tokens=2 delims=:" %%a in ('findstr "\"bitrate\"" "%CONFIG_FILE%" 2^>nul') do (
+    set "val=%%a"
+    set "val=!val: =!"
+    set "val=!val:,=!"
+    set "val=!val:"=!"
+    if not "!val!"=="" set VIDEO_BITRATE=!val!
+)
+
+:: Read max_bitrate from config
+for /f "tokens=2 delims=:" %%a in ('findstr "max_bitrate" "%CONFIG_FILE%" 2^>nul') do (
+    set "val=%%a"
+    set "val=!val: =!"
+    set "val=!val:,=!"
+    set "val=!val:"=!"
+    if not "!val!"=="" set MAX_VIDEO_BITRATE=!val!
+)
+
+:: Read frame_rate from config
+for /f "tokens=2 delims=:" %%a in ('findstr "frame_rate" "%CONFIG_FILE%" 2^>nul') do (
+    set "val=%%a"
+    set "val=!val: =!"
+    set "val=!val:,=!"
+    set "val=!val:"=!"
+    if not "!val!"=="" set VIDEO_FPS=!val!
+)
+
+:: Read audio_bitrate from config
+for /f "tokens=2 delims=:" %%a in ('findstr "audio_bitrate" "%CONFIG_FILE%" 2^>nul') do (
+    set "val=%%a"
+    set "val=!val: =!"
+    set "val=!val:,=!"
+    set "val=!val:"=!"
+    if not "!val!"=="" set AUDIO_BITRATE=!val!
+)
+
+:: Read audio_enabled from config
+for /f "tokens=2 delims=:" %%a in ('findstr "audio_enabled" "%CONFIG_FILE%" 2^>nul') do (
+    set "val=%%a"
+    set "val=!val: =!"
+    set "val=!val:,=!"
+    set "val=!val:"=!"
+    if not "!val!"=="" set AUDIO_ENABLED=!val!
+)
+
+:: Read resolution from config and map to WxH
+for /f "tokens=2 delims=:" %%a in ('findstr "\"resolution\"" "%CONFIG_FILE%" 2^>nul') do (
+    set "val=%%a"
+    set "val=!val: =!"
+    set "val=!val:,=!"
+    set "val=!val:"=!"
+    if not "!val!"=="" set RESOLUTION_CONFIG=!val!
+)
+
+:: Map resolution string to width:height
+if /i "!RESOLUTION_CONFIG!"=="720p"  set RESOLUTION=1280:720
+if /i "!RESOLUTION_CONFIG!"=="1080p" set RESOLUTION=1920:1080
+if /i "!RESOLUTION_CONFIG!"=="480p"  set RESOLUTION=854:480
+
+:: Read video_codec from config
+for /f "tokens=2 delims=:" %%a in ('findstr "\"video_codec\"" "%CONFIG_FILE%" 2^>nul') do (
+    set "val=%%a"
+    set "val=!val: =!"
+    set "val=!val:,=!"
+    set "val=!val:"=!"
+    if not "!val!"=="" set VIDEO_CODEC_CONFIG=!val!
 )
 
 :: Internal URLs
@@ -44,13 +114,21 @@ ffprobe -v error -rtsp_transport tcp -select_streams v:0 -show_entries stream=co
 set /p VIDEO_CODEC=<"%TEMP%\codec_probe.txt"
 del "%TEMP%\codec_probe.txt" 2>nul
 
-echo [%DATE% %TIME%] Detected Codec: '%VIDEO_CODEC%' >> "%LOG_FILE%"
+echo [%DATE% %TIME%] Detected Codec: '%VIDEO_CODEC%', Config: codec=%VIDEO_CODEC_CONFIG% res=%RESOLUTION% bitrate=%VIDEO_BITRATE% fps=%VIDEO_FPS% >> "%LOG_FILE%"
 
-:: Smart codec selection: copy H.264, transcode others
-if /i "%VIDEO_CODEC%"=="h264" (
+:: Smart codec selection: copy H.264 if not forced to transcode, else transcode
+if /i "%VIDEO_CODEC%"=="h264" if /i NOT "%VIDEO_CODEC_CONFIG%"=="libx264" (
     echo [%DATE% %TIME%] H.264 detected, using COPY mode ^(no transcoding^) >> "%LOG_FILE%"
-    ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i "%SOURCE_RTSP%" -c:v copy -c:a copy -f rtsp -rtsp_transport tcp "%TARGET_RTSP%" >> "%LOG_FILE%" 2>&1
+    if /i "%AUDIO_ENABLED%"=="true" (
+        ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i "%SOURCE_RTSP%" -c:v copy -c:a copy -f rtsp -rtsp_transport tcp "%TARGET_RTSP%" >> "%LOG_FILE%" 2>&1
+    ) else (
+        ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i "%SOURCE_RTSP%" -c:v copy -an -f rtsp -rtsp_transport tcp "%TARGET_RTSP%" >> "%LOG_FILE%" 2>&1
+    )
 ) else (
     echo [%DATE% %TIME%] Non-H.264 detected ^(%VIDEO_CODEC%^), transcoding to H.264 >> "%LOG_FILE%"
-    ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i "%SOURCE_RTSP%" -c:v libx264 -preset ultrafast -tune zerolatency -profile:v main -level 4.0 -pix_fmt yuv420p -b:v %VIDEO_BITRATE% -maxrate %MAX_VIDEO_BITRATE% -bufsize 1600k -r %VIDEO_FPS% -g 24 -c:a aac -ac 1 -ar 44100 -b:a %AUDIO_BITRATE% -f rtsp -rtsp_transport tcp "%TARGET_RTSP%" >> "%LOG_FILE%" 2>&1
+    if /i "%AUDIO_ENABLED%"=="true" (
+        ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i "%SOURCE_RTSP%" -c:v libx264 -preset ultrafast -tune zerolatency -profile:v main -level 4.0 -pix_fmt yuv420p -b:v %VIDEO_BITRATE% -maxrate %MAX_VIDEO_BITRATE% -bufsize 1600k -r %VIDEO_FPS% -g 24 -c:a aac -ac 1 -ar 44100 -b:a %AUDIO_BITRATE% -f rtsp -rtsp_transport tcp "%TARGET_RTSP%" >> "%LOG_FILE%" 2>&1
+    ) else (
+        ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i "%SOURCE_RTSP%" -c:v libx264 -preset ultrafast -tune zerolatency -profile:v main -level 4.0 -pix_fmt yuv420p -b:v %VIDEO_BITRATE% -maxrate %MAX_VIDEO_BITRATE% -bufsize 1600k -r %VIDEO_FPS% -g 24 -an -f rtsp -rtsp_transport tcp "%TARGET_RTSP%" >> "%LOG_FILE%" 2>&1
+    )
 )
