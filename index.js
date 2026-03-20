@@ -978,7 +978,8 @@ app.get('/admin', requireAuth, (req, res) => {
 app.get('/admin/recordings', requireAuth, (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const size = Math.min(500, Math.max(50, parseInt(req.query.size, 10) || 200));
-    const allRecordings = getRecordingsFromFilesystem('');
+    const selectedDate = (req.query && req.query.date) ? String(req.query.date) : '';
+    const allRecordings = getRecordingsFromFilesystem(selectedDate);
     const totalCount = allRecordings.length;
     const totalPages = Math.max(1, Math.ceil(totalCount / size));
     const safePage = Math.min(page, totalPages);
@@ -1017,7 +1018,8 @@ app.get('/admin/recordings', requireAuth, (req, res) => {
                 totalCount,
                 currentPage: safePage,
                 totalPages,
-                pageSize: size
+                pageSize: size,
+                filterDate: selectedDate
             });
         });
     });
@@ -1579,14 +1581,22 @@ app.delete('/api/recordings/:id', requireApiAuth, (req, res) => {
 
         const fullPath = path.join(__dirname, row.file_path);
         const fs = require('fs');
-        if (fs.existsSync(fullPath)) {
-            fs.unlinkSync(fullPath);
-        }
 
-        db.run("DELETE FROM recordings WHERE id = ?", [req.params.id], (err) => {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ message: "deleted" });
-        });
+        const deleteFromDb = () => {
+            db.run("DELETE FROM recordings WHERE id = ?", [req.params.id], (dbErr) => {
+                if (dbErr) return res.status(500).json({ error: dbErr.message });
+                res.json({ message: "deleted" });
+            });
+        };
+
+        if (fs.existsSync(fullPath)) {
+            fs.unlink(fullPath, (unlinkErr) => {
+                if (unlinkErr) console.error('Warning: could not delete file:', unlinkErr.message);
+                deleteFromDb();
+            });
+        } else {
+            deleteFromDb();
+        }
     });
 });
 
@@ -1714,22 +1724,20 @@ function cleanupOrphanRecordings() {
     db.all('SELECT id, file_path FROM recordings', [], (err, rows) => {
         if (err || !rows || rows.length === 0) return;
 
+        const orphans = rows.filter(row => !fs.existsSync(path.join(baseDir, row.file_path)));
+        if (orphans.length === 0) return;
+
+        let pending = orphans.length;
         let deleted = 0;
 
-        rows.forEach((row) => {
-            const fullPath = path.join(baseDir, row.file_path);
-            if (!fs.existsSync(fullPath)) {
-                db.run('DELETE FROM recordings WHERE id = ?', [row.id], (delErr) => {
-                    if (!delErr) {
-                        deleted += 1;
-                    }
-                });
-            }
+        orphans.forEach((row) => {
+            db.run('DELETE FROM recordings WHERE id = ?', [row.id], (delErr) => {
+                if (!delErr) deleted++;
+                if (--pending === 0) {
+                    console.log(`[Cleanup] Removed ${deleted} orphan recordings without files`);
+                }
+            });
         });
-
-        if (deleted > 0) {
-            console.log(`[Cleanup] Removed ${deleted} orphan recordings without files`);
-        }
     });
 }
 
@@ -2031,10 +2039,10 @@ function telegramDeleteOldRecordings(days, callback) {
             if (fs.existsSync(fullPath)) {
                 try {
                     fs.unlinkSync(fullPath);
+                    freedBytes += row.size || 0;  // Only count space freed for files that actually existed
                 } catch (e) { console.error('Delete file error:', e.message); }
             }
             deletedCount++;
-            freedBytes += row.size || 0;
         });
 
         db.run("DELETE FROM recordings WHERE created_at < ?", [dateStr], (delErr) => {

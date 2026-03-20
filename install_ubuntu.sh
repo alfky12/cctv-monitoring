@@ -143,7 +143,7 @@ if [ "$VIDEO_CODEC" = "h264" ] && [ "$VIDEO_CODEC_CONFIG" != "libx264" ]; then
     fi
 else
     # Transcode required
-    echo "[$(date)] Transcoding to H.264 ($RESOLUTION, $VIDEO_BITRATE)" >> "$LOG_FILE"
+    echo "[$(date)] Transcoding to H.264 ($RESOLUTION, $VIDEO_BITRATE_CONFIG)" >> "$LOG_FILE"
     FFMPEG_CMD="$FFMPEG_CMD -c:v libx264 -preset superfast -tune zerolatency -profile:v main -pix_fmt yuv420p"
     FFMPEG_CMD="$FFMPEG_CMD -s \"$RESOLUTION\" -b:v \"$VIDEO_BITRATE_CONFIG\" -maxrate \"$MAX_VIDEO_BITRATE_CONFIG\" -bufsize 3000k"
     FFMPEG_CMD="$FFMPEG_CMD -r \"$VIDEO_FPS_CONFIG\" -g $(($VIDEO_FPS_CONFIG * 2))"
@@ -162,11 +162,11 @@ echo "[$(date)] Command: $FFMPEG_CMD" >> "$LOG_FILE"
 eval $FFMPEG_CMD >> "$LOG_FILE" 2>&1
 EOF
 
-cat << 'EOF' > record_notify.sh
+cat << 'RECORD_EOF' > record_notify.sh
 #!/bin/bash
 # Logic to notify web-app about new recording
 curl -X POST -H "Content-Type: application/json" -d "{\"path\":\"$MTX_PATH\", \"file\":\"$MTX_SEGMENT_PATH\"}" http://localhost:3003/api/recordings/notify
-EOF
+RECORD_EOF
 
 chmod +x smart_transcode.sh record_notify.sh
 
@@ -186,8 +186,15 @@ sed -i 's/^api: .*/api: yes/g' mediamtx.yml
 # Set HLS to fMP4 for H265 support
 sed -i 's/hlsVariant: .*/hlsVariant: fmp4/g' mediamtx.yml
 sed -i 's/recordFormat: .*/recordFormat: fmp4/g' mediamtx.yml
+# IMPORTANT: Disable global recording - Node.js controls recording per-path via API
+# Only cam_X (transcoded) paths will be recorded, NOT cam_X_input (raw) paths
+sed -i 's/^record: .*/record: false/g' mediamtx.yml
+# Use %f (microseconds) in recordPath to prevent filename collisions
+sed -i 's|recordPath: .*|recordPath: ./recordings/%path/%Y-%m-%d_%H-%M-%S-%f|g' mediamtx.yml
 # Set recording retention to 7 days
 sed -i 's/recordDeleteAfter: .*/recordDeleteAfter: 7d/g' mediamtx.yml
+# Set notify script for new recordings
+sed -i 's/runOnRecordSegmentComplete: .*/runOnRecordSegmentComplete: .\/record_notify.sh/g' mediamtx.yml
 # Linux: use .sh for record notify (Node app will also set runOnReady via API on startup)
 sed -i 's/record_notify\.bat/record_notify.sh/g' mediamtx.yml
 

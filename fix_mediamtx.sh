@@ -33,7 +33,7 @@ if [[ "$FILE_TYPE" == *"HTML"* ]] || [[ "$FILE_TYPE" == *"text"* ]]; then
     fi
     
     rm -f mediamtx mediamtx.yml
-    wget -O mediamtx.tar.gz "https://github.com/bluenviron/mediamtx/releases/download/v1.9.3/mediamtx_v1.9.3_${MTX_ARCH}.tar.gz"
+    wget -O mediamtx.tar.gz "https://github.com/bluenviron/mediamtx/releases/download/v1.16.1/mediamtx_v1.16.1_${MTX_ARCH}.tar.gz"
     tar -xvzf mediamtx.tar.gz mediamtx mediamtx.yml
     rm mediamtx.tar.gz
     chmod +x mediamtx
@@ -51,6 +51,8 @@ if [[ "$FILE_TYPE" == *"HTML"* ]] || [[ "$FILE_TYPE" == *"text"* ]]; then
     sed -i 's/^api: .*/api: yes/g' mediamtx.yml
     sed -i 's/hlsVariant: .*/hlsVariant: fmp4/g' mediamtx.yml
     sed -i 's/recordFormat: .*/recordFormat: fmp4/g' mediamtx.yml
+    sed -i 's/^record: .*/record: false/g' mediamtx.yml
+    sed -i 's|recordPath: .*|recordPath: ./recordings/%path/%Y-%m-%d_%H-%M-%S-%f|g' mediamtx.yml
     sed -i 's/recordDeleteAfter: .*/recordDeleteAfter: 7d/g' mediamtx.yml
     sed -i 's/record_notify\.bat/record_notify.sh/g' mediamtx.yml
 fi
@@ -77,6 +79,9 @@ if ps -p $PID > /dev/null; then
         sed -i 's/webrtcAddress: :8889/webrtcAddress: :8890/g' mediamtx.yml
         sed -i 's/webrtcICEUDPMuxAddress: :8189/webrtcICEUDPMuxAddress: ""/g' mediamtx.yml
         sed -i 's/recordFormat: .*/recordFormat: fmp4/g' mediamtx.yml
+        sed -i 's/^record: .*/record: false/g' mediamtx.yml
+        sed -i 's|recordPath: .*|recordPath: ./recordings/%path/%Y-%m-%d_%H-%M-%S-%f|g' mediamtx.yml
+        sed -i 's/recordDeleteAfter: .*/recordDeleteAfter: 7d/g' mediamtx.yml
     fi
 
     sudo systemctl restart mediamtx

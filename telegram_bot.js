@@ -684,8 +684,8 @@ function setupListeners() {
         }
         else if (state.step === 'ask_new_password') {
             state.password = text.trim();
-            if (state.password.length < 4) {
-                bot.sendMessage(chatId, '❌ Password minimal 4 karakter. Silakan input ulang:');
+            if (state.password.length < 8) {
+                bot.sendMessage(chatId, '❌ Password minimal 8 karakter. Silakan input ulang:');
                 return;
             }
 

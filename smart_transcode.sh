@@ -91,7 +91,7 @@ if [ "$VIDEO_CODEC" = "h264" ] && [ "$VIDEO_CODEC_CONFIG" != "libx264" ]; then
     fi
 else
     # Transcode required
-    echo "[$(date)] Transcoding to H.264 ($RESOLUTION, $VIDEO_BITRATE)" >> "$LOG_FILE"
+    echo "[$(date)] Transcoding to H.264 ($RESOLUTION, $VIDEO_BITRATE_CONFIG)" >> "$LOG_FILE"
     FFMPEG_CMD="$FFMPEG_CMD -c:v libx264 -preset superfast -tune zerolatency -profile:v main -pix_fmt yuv420p"
     FFMPEG_CMD="$FFMPEG_CMD -s \"$RESOLUTION\" -b:v \"$VIDEO_BITRATE_CONFIG\" -maxrate \"$MAX_VIDEO_BITRATE_CONFIG\" -bufsize 3000k"
     FFMPEG_CMD="$FFMPEG_CMD -r \"$VIDEO_FPS_CONFIG\" -g $(($VIDEO_FPS_CONFIG * 2))"
