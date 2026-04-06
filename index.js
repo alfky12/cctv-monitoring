@@ -57,6 +57,12 @@ function getHlsBaseUrl() {
     return `http://127.0.0.1:${hlsPort}`;
 }
 
+function getHlsBaseUrlForHealthCheck() {
+    const hlsPort = config.mediamtx?.hls_port || 8856;
+    const host = normalizeHostValue(config.mediamtx?.host) || '127.0.0.1';
+    return `http://${host}:${hlsPort}`;
+}
+
 function checkHlsUrl(url) {
     return new Promise((resolve) => {
         let parsed;
@@ -90,7 +96,7 @@ function checkHlsUrl(url) {
 }
 
 async function checkHlsStatus(cameraId) {
-    const baseUrl = getHlsBaseUrl();
+    const baseUrl = getHlsBaseUrlForHealthCheck();
     const transcodedUrl = `${baseUrl}/cam_${cameraId}/index.m3u8`;
     const inputUrl = `${baseUrl}/cam_${cameraId}_input/index.m3u8`;
     const [transcodedReady, inputReady] = await Promise.all([
@@ -115,6 +121,13 @@ let recordingUsageCache = { totalBytes: 0, totalFiles: 0, lastUpdate: 0 };
 let diskCriticalAlerted = false;
 let mediaMtxErrorNotified = false;
 let loginAttempts = {};
+let mediaMtxState = {
+    isAvailable: null,
+    lastAvailabilityCheckAt: 0,
+    unreachableUntil: 0,
+    lastErrorLogAt: 0,
+    lastErrorMessage: ''
+};
 
 function formatDateJakarta(date) {
     const parts = new Intl.DateTimeFormat('en-GB', {
@@ -405,6 +418,9 @@ function mediaMtxRequestInternal(hostname, port, method, path, body = null) {
             let data = '';
             res.on('data', (chunk) => data += chunk);
             res.on('end', () => {
+                mediaMtxState.isAvailable = true;
+                mediaMtxState.lastAvailabilityCheckAt = Date.now();
+                mediaMtxState.unreachableUntil = 0;
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     try {
                         resolve(data ? JSON.parse(data) : {});
@@ -418,9 +434,22 @@ function mediaMtxRequestInternal(hostname, port, method, path, body = null) {
             });
         });
 
+        req.setTimeout(3500, () => {
+            req.destroy(new Error('timeout'));
+        });
+
         req.on('error', (e) => {
-            console.error(`MediaMTX API Error: ${e.message}`);
-            resolve({ error: true, message: e.message });
+            const msg = e?.message || String(e);
+            const now = Date.now();
+            mediaMtxState.isAvailable = false;
+            mediaMtxState.lastAvailabilityCheckAt = now;
+            mediaMtxState.unreachableUntil = now + 5000;
+            if (mediaMtxState.lastErrorMessage !== msg || (now - mediaMtxState.lastErrorLogAt) > 15000) {
+                console.error(`MediaMTX API Error: ${msg}`);
+                mediaMtxState.lastErrorLogAt = now;
+                mediaMtxState.lastErrorMessage = msg;
+            }
+            resolve({ error: true, message: msg });
         });
 
         if (body) {
@@ -430,7 +459,28 @@ function mediaMtxRequestInternal(hostname, port, method, path, body = null) {
     });
 }
 
+async function ensureMediaMtxAvailable() {
+    const now = Date.now();
+    if (mediaMtxState.unreachableUntil && now < mediaMtxState.unreachableUntil) return false;
+    if (mediaMtxState.isAvailable === true && (now - mediaMtxState.lastAvailabilityCheckAt) < 5000) return true;
+    if (mediaMtxState.isAvailable === false && (now - mediaMtxState.lastAvailabilityCheckAt) < 5000) return false;
+
+    const primaryHost = getEffectiveMediaMtxHost();
+    const apiPort = config.mediamtx?.api_port || 9123;
+    const result = await mediaMtxRequestInternal(primaryHost, apiPort, 'GET', '/v3/paths/list');
+    if (!result?.error) return true;
+    if (primaryHost !== '127.0.0.1') {
+        const fallback = await mediaMtxRequestInternal('127.0.0.1', apiPort, 'GET', '/v3/paths/list');
+        return !fallback?.error;
+    }
+    return false;
+}
+
 async function mediaMtxRequest(method, path, body = null) {
+    const now = Date.now();
+    if (mediaMtxState.unreachableUntil && now < mediaMtxState.unreachableUntil) {
+        return { error: true, message: 'MediaMTX unreachable (cooldown)' };
+    }
     const primaryHost = getEffectiveMediaMtxHost();
     const apiPort = config.mediamtx?.api_port || 9123;
     const primaryResult = await mediaMtxRequestInternal(primaryHost, apiPort, method, path, body);
@@ -441,6 +491,11 @@ async function mediaMtxRequest(method, path, body = null) {
 }
 
 async function setupMediaMtxGlobalConfig() {
+    const ok = await ensureMediaMtxAvailable();
+    if (!ok) {
+        console.log('MediaMTX tidak terdeteksi. Lewati setup konfigurasi global.');
+        return false;
+    }
     const isWin = process.platform === 'win32';
     const transcodeScript = isWin ? 'smart_transcode.bat' : './smart_transcode.sh';
     const notifyScript = isWin ? 'record_notify.bat' : './record_notify.sh';
@@ -448,15 +503,18 @@ async function setupMediaMtxGlobalConfig() {
     console.log(`Detecting OS: ${isWin ? 'Windows' : 'Linux/Ubuntu'}. Setting up MediaMTX scripts...`);
 
     // Apply global path defaults
-    await mediaMtxRequest('PATCH', '/defaults/update', {
+    const result = await mediaMtxRequest('PATCH', '/defaults/update', {
         runOnReady: transcodeScript,
         runOnReadyRestart: true,
         runOnRecordSegmentComplete: notifyScript,
         rtspTransport: 'tcp'
     });
+    return !result?.error;
 }
 
 async function updateMediaMtxRecording() {
+    const ok = await ensureMediaMtxAvailable();
+    if (!ok) return;
     console.log('Applying recording settings to MediaMTX...');
     const rec = config.recording || {};
     const isInsideWindow = checkTimeWindow(rec.start_time, rec.end_time);
@@ -471,11 +529,14 @@ async function updateMediaMtxRecording() {
     const isWin = process.platform === 'win32';
 
     // Disable recording on all paths first (global defaults)
-    await mediaMtxRequest('PATCH', '/defaults/update', {
+    const defaultsResult = await mediaMtxRequest('PATCH', '/defaults/update', {
         record: false,
         runOnReady: isWin ? 'smart_transcode.bat' : './smart_transcode.sh',
-        runOnRecordSegmentComplete: isWin ? 'record_notify.bat' : './record_notify.sh'
+        runOnRecordSegmentComplete: isWin ? 'record_notify.bat' : './record_notify.sh',
+        recordSegmentDuration: rec.segment_duration || '60m',
+        recordDeleteAfter: rec.delete_after || '7d'
     });
+    if (defaultsResult?.error) return;
 
     // Enable recording ONLY for transcoded paths (cam_1, cam_2, ...). Path cam_X_input stays record: false.
     db.all("SELECT id FROM cameras", [], async (err, rows) => {
@@ -712,6 +773,9 @@ async function updateSystemHealth() {
     try {
         // Use /v3/paths/list for real-time status (not just config)
         const pathsData = await mediaMtxRequest('GET', '/v3/paths/list');
+        if (pathsData?.error) {
+            throw new Error(pathsData.message || 'MediaMTX API error');
+        }
         mediaMtxErrorNotified = false;
         const itemsList = pathsData.items || [];
 
@@ -818,12 +882,17 @@ function checkTimeWindow(startStr, endStr) {
 }
 
 async function registerCamera(cam) {
+    const ok = await ensureMediaMtxAvailable();
+    if (!ok) {
+        return { error: true, message: 'MediaMTX tidak tersedia' };
+    }
     const pathName = `cam_${cam.id}_input`;
 
     console.log(`Registering camera ${cam.id} (${cam.nama}) to MediaMTX...`);
 
     // Always delete first to ensure a fresh registration if URL changed
-    await mediaMtxRequest('DELETE', '/delete/' + pathName);
+    const delRes = await mediaMtxRequest('DELETE', '/delete/' + pathName);
+    if (delRes?.error) return delRes;
 
     // Since we use HLS fMP4 variant, H265/HEVC is natively supported
     // No transcoding needed - better quality and performance
@@ -837,13 +906,20 @@ async function registerCamera(cam) {
 }
 
 function syncCameras() {
-    console.log('Syncing all cameras with MediaMTX...');
-    db.all("SELECT * FROM cameras", async (err, rows) => {
-        if (err) return console.error(err);
-        for (const cam of rows) {
-            await registerCamera(cam);
+    (async () => {
+        const ok = await ensureMediaMtxAvailable();
+        if (!ok) {
+            console.log('MediaMTX tidak terdeteksi. Lewati sinkronisasi kamera.');
+            return;
         }
-    });
+        console.log('Syncing all cameras with MediaMTX...');
+        db.all("SELECT * FROM cameras", async (err, rows) => {
+            if (err) return console.error(err);
+            for (const cam of rows) {
+                await registerCamera(cam);
+            }
+        });
+    })();
 }
 
 // --- Routes ---
@@ -876,15 +952,8 @@ app.get('/archive', (req, res) => {
     db.all("SELECT id, nama FROM cameras", [], (errCam, cams) => {
         const cameraNameById = new Map((cams || []).map(cam => [String(cam.id), cam.nama]));
         const normalized = recordings.map(rec => {
-            // Gunakan nama folder sebagai fallback jika kamera sudah dihapus dari DB
-            const folderName = rec.camera_folder || `cam_${rec.camera_id}`;
-            const dbName = cameraNameById.get(String(rec.camera_id));
-            
-            // Prioritas: Nama DB -> Nama Folder
-            // Jika ingin folder sebagai identitas utama saat arsip:
-            const displayName = dbName ? `${dbName} (${folderName})` : folderName;
-            
-            return { ...rec, camera_name: displayName };
+            const name = cameraNameById.get(String(rec.camera_id)) || rec.camera_folder || 'Unknown';
+            return { ...rec, camera_name: name };
         });
         res.render('public_recordings', {
             recordings: normalized,
@@ -978,8 +1047,7 @@ app.get('/admin', requireAuth, (req, res) => {
 app.get('/admin/recordings', requireAuth, (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const size = Math.min(500, Math.max(50, parseInt(req.query.size, 10) || 200));
-    const selectedDate = (req.query && req.query.date) ? String(req.query.date) : '';
-    const allRecordings = getRecordingsFromFilesystem(selectedDate);
+    const allRecordings = getRecordingsFromFilesystem('');
     const totalCount = allRecordings.length;
     const totalPages = Math.max(1, Math.ceil(totalCount / size));
     const safePage = Math.min(page, totalPages);
@@ -1018,8 +1086,7 @@ app.get('/admin/recordings', requireAuth, (req, res) => {
                 totalCount,
                 currentPage: safePage,
                 totalPages,
-                pageSize: size,
-                filterDate: selectedDate
+                pageSize: size
             });
         });
     });
@@ -1198,6 +1265,9 @@ app.get('/api/status', (req, res) => {
         let transcodeStatus = {};
         try {
             const pathsData = await mediaMtxRequest('GET', '/v3/paths/list');
+            if (pathsData?.error) {
+                throw new Error(pathsData.message || 'MediaMTX API error');
+            }
             const items = pathsData.items || [];
             // Handle both array (v1.9+) and object (older) formats
             const activePathNames = Array.isArray(items) ? items.map(p => p.name) : Object.keys(items);
@@ -1214,7 +1284,7 @@ app.get('/api/status', (req, res) => {
             });
         } catch (e) {
             // Ignore errors from MediaMTX check, use empty transcode status
-            console.error('Status API MediaMTX check error:', e.message);
+            console.error('Status API MediaMTX check error:', e?.message || String(e));
         }
 
         res.json({
@@ -1579,24 +1649,28 @@ app.delete('/api/recordings/:id', requireApiAuth, (req, res) => {
     db.get("SELECT file_path FROM recordings WHERE id = ?", [req.params.id], (err, row) => {
         if (err || !row) return res.status(404).json({ error: "Not found" });
 
-        const fullPath = path.join(__dirname, row.file_path);
         const fs = require('fs');
-
-        const deleteFromDb = () => {
-            db.run("DELETE FROM recordings WHERE id = ?", [req.params.id], (dbErr) => {
-                if (dbErr) return res.status(500).json({ error: dbErr.message });
-                res.json({ message: "deleted" });
-            });
-        };
-
-        if (fs.existsSync(fullPath)) {
-            fs.unlink(fullPath, (unlinkErr) => {
-                if (unlinkErr) console.error('Warning: could not delete file:', unlinkErr.message);
-                deleteFromDb();
-            });
-        } else {
-            deleteFromDb();
+        const baseDir = path.resolve(__dirname);
+        const fullPath = path.resolve(baseDir, row.file_path);
+        if (!fullPath.startsWith(baseDir + path.sep)) {
+            return res.status(400).json({ error: 'Invalid path' });
         }
+
+        let fileDeleted = false;
+        let fileError = null;
+        try {
+            if (fs.existsSync(fullPath)) {
+                fs.unlinkSync(fullPath);
+                fileDeleted = true;
+            }
+        } catch (e) {
+            fileError = e?.message || String(e);
+        }
+
+        db.run("DELETE FROM recordings WHERE id = ?", [req.params.id], (delErr) => {
+            if (delErr) return res.status(500).json({ error: delErr.message });
+            res.json({ message: "deleted", fileDeleted, fileError });
+        });
     });
 });
 
@@ -1724,19 +1798,75 @@ function cleanupOrphanRecordings() {
     db.all('SELECT id, file_path FROM recordings', [], (err, rows) => {
         if (err || !rows || rows.length === 0) return;
 
-        const orphans = rows.filter(row => !fs.existsSync(path.join(baseDir, row.file_path)));
-        if (orphans.length === 0) return;
-
-        let pending = orphans.length;
         let deleted = 0;
 
-        orphans.forEach((row) => {
-            db.run('DELETE FROM recordings WHERE id = ?', [row.id], (delErr) => {
-                if (!delErr) deleted++;
-                if (--pending === 0) {
-                    console.log(`[Cleanup] Removed ${deleted} orphan recordings without files`);
+        rows.forEach((row) => {
+            const fullPath = path.join(baseDir, row.file_path);
+            if (!fs.existsSync(fullPath)) {
+                db.run('DELETE FROM recordings WHERE id = ?', [row.id], (delErr) => {
+                    if (!delErr) {
+                        deleted += 1;
+                    }
+                });
+            }
+        });
+
+        if (deleted > 0) {
+            console.log(`[Cleanup] Removed ${deleted} orphan recordings without files`);
+        }
+    });
+}
+
+function parseDurationToMs(value) {
+    if (value === null || value === undefined) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+    const m = raw.match(/^(\d+)\s*([smhdw])?$/i);
+    if (!m) return null;
+    const amount = parseInt(m[1], 10);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const unit = (m[2] || 'd').toLowerCase();
+    const multipliers = {
+        s: 1000,
+        m: 60 * 1000,
+        h: 60 * 60 * 1000,
+        d: 24 * 60 * 60 * 1000,
+        w: 7 * 24 * 60 * 60 * 1000
+    };
+    return amount * (multipliers[unit] || multipliers.d);
+}
+
+function cleanupOldRecordingsByRetention() {
+    const retentionMs = parseDurationToMs(config.recording?.delete_after);
+    if (!retentionMs) return;
+
+    const cutoff = new Date(Date.now() - retentionMs);
+    const cutoffStr = formatDateJakarta(cutoff);
+    const fs = require('fs');
+    const baseDir = path.resolve(__dirname);
+
+    db.all("SELECT id, file_path, size FROM recordings WHERE created_at < ?", [cutoffStr], (err, rows) => {
+        if (err || !rows || rows.length === 0) return;
+
+        let deletedCount = 0;
+        let freedBytes = 0;
+        rows.forEach((row) => {
+            const fullPath = path.resolve(baseDir, row.file_path);
+            if (!fullPath.startsWith(baseDir + path.sep)) return;
+            try {
+                if (fs.existsSync(fullPath)) {
+                    fs.unlinkSync(fullPath);
                 }
-            });
+            } catch (e) { }
+            deletedCount += 1;
+            freedBytes += row.size || 0;
+        });
+
+        db.run("DELETE FROM recordings WHERE created_at < ?", [cutoffStr], () => {
+            if (deletedCount > 0) {
+                const freedMB = (freedBytes / 1024 / 1024).toFixed(2);
+                console.log(`[Cleanup] Deleted ${deletedCount} old recording(s) (< ${cutoffStr}), freed ~${freedMB} MB`);
+            }
         });
     });
 }
@@ -1984,6 +2114,7 @@ app.listen(PORT, () => {
         scanExistingRecordings();
         // Cleanup orphan DB rows for recordings whose files are already gone
         cleanupOrphanRecordings();
+        setTimeout(cleanupOldRecordingsByRetention, 15000);
     }, 2000);
 
     // Periodically check recording schedule every minute
@@ -1995,6 +2126,7 @@ app.listen(PORT, () => {
 
     // Periodically cleanup orphan recordings every 6 hours
     setInterval(cleanupOrphanRecordings, 6 * 60 * 60 * 1000);
+    setInterval(cleanupOldRecordingsByRetention, 6 * 60 * 60 * 1000);
 });
 
 // --- Telegram Bot Helpers ---
@@ -2023,7 +2155,7 @@ function telegramDeleteOldRecordings(days, callback) {
 
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - days);
-    const dateStr = cutoffDate.toISOString().replace('T', ' ').substring(0, 19);
+    const dateStr = formatDateJakarta(cutoffDate);
 
     db.all("SELECT id, file_path, size FROM recordings WHERE created_at < ?", [dateStr], (err, rows) => {
         if (err) return callback({ error: err.message });
@@ -2039,10 +2171,10 @@ function telegramDeleteOldRecordings(days, callback) {
             if (fs.existsSync(fullPath)) {
                 try {
                     fs.unlinkSync(fullPath);
-                    freedBytes += row.size || 0;  // Only count space freed for files that actually existed
                 } catch (e) { console.error('Delete file error:', e.message); }
             }
             deletedCount++;
+            freedBytes += row.size || 0;
         });
 
         db.run("DELETE FROM recordings WHERE created_at < ?", [dateStr], (delErr) => {

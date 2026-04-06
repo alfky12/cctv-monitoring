@@ -6,6 +6,7 @@ let bot = null;
 let botConfig = {};
 let appConfig = {};
 let db = null;
+let pollingErrorState = { lastLogAt: 0, lastMessage: '' };
 let services = {
     getCameraStatus: () => ({}),
     getDiskUsage: () => ({}),
@@ -64,6 +65,21 @@ function init(config, database, serviceProvider) {
     try {
         bot = new TelegramBot(botConfig.bot_token, { polling: true });
         console.log('[Telegram] Bot started in polling mode.');
+
+        bot.on('polling_error', (err) => {
+            const body = err?.response?.body;
+            const message = typeof body === 'string' ? body : (err?.message || (body ? JSON.stringify(body) : String(err)));
+            const now = Date.now();
+            if (pollingErrorState.lastMessage !== message || (now - pollingErrorState.lastLogAt) > 15000) {
+                console.error('[Telegram] polling_error:', message);
+                pollingErrorState.lastLogAt = now;
+                pollingErrorState.lastMessage = message;
+            }
+            if (message.includes('409') || message.includes('Conflict')) {
+                try { bot.stopPolling(); } catch (e) { }
+                bot = null;
+            }
+        });
 
         // Set commands
         bot.setMyCommands([
@@ -684,8 +700,8 @@ function setupListeners() {
         }
         else if (state.step === 'ask_new_password') {
             state.password = text.trim();
-            if (state.password.length < 8) {
-                bot.sendMessage(chatId, '❌ Password minimal 8 karakter. Silakan input ulang:');
+            if (state.password.length < 4) {
+                bot.sendMessage(chatId, '❌ Password minimal 4 karakter. Silakan input ulang:');
                 return;
             }
 
