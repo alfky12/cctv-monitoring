@@ -57,10 +57,22 @@ function getHlsBaseUrl() {
     return `http://127.0.0.1:${hlsPort}`;
 }
 
-function getHlsBaseUrlForHealthCheck() {
+function getHlsHealthCheckBases() {
     const hlsPort = config.mediamtx?.hls_port || 8856;
-    const host = normalizeHostValue(config.mediamtx?.host) || '127.0.0.1';
-    return `http://${host}:${hlsPort}`;
+    const internalBases = [`http://127.0.0.1:${hlsPort}`, `http://localhost:${hlsPort}`];
+    const publicUrl = (config.mediamtx?.public_hls_url || '').trim();
+    const publicBase = publicUrl ? publicUrl.replace(/\/+$/, '') : '';
+
+    const bases = [...internalBases];
+    if (publicBase) bases.push(publicBase);
+
+    const uniq = [];
+    bases.forEach((b) => {
+        const v = String(b || '').trim();
+        if (!v) return;
+        if (!uniq.includes(v)) uniq.push(v);
+    });
+    return uniq;
 }
 
 function checkHlsUrl(url) {
@@ -79,7 +91,7 @@ function checkHlsUrl(url) {
                 port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
                 path: parsed.pathname + parsed.search,
                 method: 'GET',
-                timeout: 2500
+                timeout: 6000
             },
             (res) => {
                 res.resume();
@@ -95,18 +107,32 @@ function checkHlsUrl(url) {
     });
 }
 
+function getPathReady(item) {
+    if (!item) return false;
+    if (typeof item.ready === 'boolean') return item.ready;
+    if (typeof item.sourceReady === 'boolean') return item.sourceReady;
+    if (item.source && typeof item.source.ready === 'boolean') return item.source.ready;
+    if (typeof item.state === 'string') return item.state.toLowerCase() === 'ready';
+    if (item.source && typeof item.source.state === 'string') return item.source.state.toLowerCase() === 'ready';
+    if (Array.isArray(item.readers)) return item.readers.length > 0;
+    return false;
+}
+
 async function checkHlsStatus(cameraId) {
-    const baseUrl = getHlsBaseUrlForHealthCheck();
-    const transcodedUrl = `${baseUrl}/cam_${cameraId}/index.m3u8`;
-    const inputUrl = `${baseUrl}/cam_${cameraId}_input/index.m3u8`;
-    const [transcodedReady, inputReady] = await Promise.all([
-        checkHlsUrl(transcodedUrl),
-        checkHlsUrl(inputUrl)
-    ]);
-    return {
-        ready: transcodedReady || inputReady,
-        transcoded: transcodedReady
-    };
+    const bases = getHlsHealthCheckBases();
+    for (const baseUrl of bases) {
+        const transcodedUrl = `${baseUrl}/cam_${cameraId}/index.m3u8`;
+        const inputUrl = `${baseUrl}/cam_${cameraId}_input/index.m3u8`;
+        const [transcodedReady, inputReady] = await Promise.all([
+            checkHlsUrl(transcodedUrl),
+            checkHlsUrl(inputUrl)
+        ]);
+        const ready = transcodedReady || inputReady;
+        if (ready) {
+            return { ready, transcoded: transcodedReady };
+        }
+    }
+    return { ready: false, transcoded: false };
 }
 
 app.locals.site = config.site;
@@ -118,6 +144,7 @@ app.locals.hls_port = config.mediamtx?.hls_port || 8856;
 let cameraStatus = {};
 let diskUsage = { total: 0, used: 0, percent: 0 };
 let recordingUsageCache = { totalBytes: 0, totalFiles: 0, lastUpdate: 0 };
+let hlsStatusCache = { lastUpdate: 0, data: {} };
 let diskCriticalAlerted = false;
 let mediaMtxErrorNotified = false;
 let loginAttempts = {};
@@ -795,19 +822,27 @@ async function updateSystemHealth() {
         });
 
         const now = new Date();
-        const hlsStatuses = await Promise.all(
-            rows.map((cam) => checkHlsStatus(cam.id))
-        );
+        const nowMs = Date.now();
+        if (!hlsStatusCache.lastUpdate || (nowMs - hlsStatusCache.lastUpdate) > 60000) {
+            const hlsStatuses = await Promise.all(rows.map((cam) => checkHlsStatus(cam.id)));
+            const byId = {};
+            rows.forEach((cam, idx) => {
+                byId[String(cam.id)] = hlsStatuses[idx] || { ready: false, transcoded: false };
+            });
+            hlsStatusCache = { lastUpdate: nowMs, data: byId };
+        }
 
-        rows.forEach((cam, idx) => {
+        rows.forEach((cam) => {
             const inputPath = `cam_${cam.id}_input`;
             const outputPath = `cam_${cam.id}`;
 
             const inputItem = activePaths[inputPath];
             const outputItem = activePaths[outputPath];
 
-            const hlsStatus = hlsStatuses[idx] || { ready: false, transcoded: false };
-            const currentlyOnline = !!(hlsStatus.ready || (inputItem && inputItem.ready) || (outputItem && outputItem.ready));
+            const inputReady = getPathReady(inputItem);
+            const outputReady = getPathReady(outputItem);
+            const hlsStatus = hlsStatusCache.data[String(cam.id)] || { ready: false, transcoded: false };
+            const currentlyOnline = !!(outputReady || inputReady || hlsStatus.ready);
 
             const prevState = cameraStatus[cam.id] || { online: false };
 
@@ -850,8 +885,8 @@ async function updateSystemHealth() {
                 hasBeenChecked: true,
                 offlineSince,
                 offlineAlertSent,
-                hlsReady: hlsStatus.ready,
-                hlsTranscoded: hlsStatus.transcoded
+                hlsReady: hlsStatus.ready || inputReady || outputReady,
+                hlsTranscoded: hlsStatus.transcoded || outputReady
             };
         });
     } catch (e) {
