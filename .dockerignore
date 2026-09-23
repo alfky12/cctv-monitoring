@@ -1,0 +1,10 @@
+.git
+.github
+node_modules
+data
+recordings
+cameras.db
+cameras.db-shm
+cameras.db-wal
+*.log
+.env
