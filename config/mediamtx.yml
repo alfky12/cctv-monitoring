@@ -1,0 +1,6 @@
+paths:
+  all_others:
+    record: yes
+    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+    recordFormat: fmp4
+    runOnRecordSegmentComplete: curl -s -X POST -H "Content-Type: application/json" -d "{\"path\":\"$MTX_PATH\",\"file\":\"$MTX_SEGMENT_PATH\"}" http://127.0.0.1:3003/api/recordings/notify
