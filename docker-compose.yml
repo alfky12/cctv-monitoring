@@ -1,0 +1,29 @@
+version: '3.8'
+services:
+  cctv:
+    image: ghcr.io/alfky12/cctv-monitoring:latest
+    container_name: cctv-monitoring
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - TZ=Asia/Jayapura
+      - NODE_ENV=production
+      - DATA_DIR=/app/data
+    volumes:
+      - cctv_data:/app/data
+      - cctv_recordings:/app/recordings
+    depends_on:
+      - mediamtx
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: cctv-mediamtx
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./config/mediamtx.yml:/mediamtx.yml:ro
+      - cctv_recordings:/recordings
+
+volumes:
+  cctv_data:
+  cctv_recordings:
