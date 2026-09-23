@@ -1409,66 +1409,24 @@ app.get('/api/system/version', (req, res) => {
     }
 });
 
-
 app.post('/api/system/update', requireApiAuth, (req, res) => {
     console.log('[System Update] Update requested from admin panel.');
-    const { exec } = require('child_process');
+    console.log('[Update] Pembaruan sistem dinonaktifkan di mode Docker.');
 
-    // Step 1: Git Pull
-    exec('git pull', (err, stdout, stderr) => {
-        if (err) {
-            console.error('[Update] Git pull failed:', err);
-            sendTelegramMessage(`❌ <b>Update aplikasi gagal</b>\nLangkah: git pull\nError: ${err.message}`);
-            return res.status(500).json({
-                success: false,
-                message: 'Gagal melakukan git pull. Pastikan Git terpasang dan remote repository tersedia.',
-                error: err.message,
-                stderr: stderr
-            });
-        }
+    // Kirim notifikasi Telegram jika bot diaktifkan
+    if (typeof sendTelegramMessage === 'function') {
+        sendTelegramMessage('ℹ️ <b>Permintaan Update Ditolak</b>\nAplikasi berjalan di mode Docker. Silakan lakukan pembaruan (pull image) melalui Portainer.');
+    }
 
-        console.log('[Update] Git pull success:', stdout);
-        sendTelegramMessage('⬇️ <b>Update aplikasi dimulai</b>\nGit pull berhasil. Melanjutkan npm install dan restart (jika Linux).');
-
-        // Respond to user immediately so they see success before server goes down
-        res.json({
-            success: true,
-            message: 'Git pull berhasil. Kode terbaru telah diunduh.',
-            output: stdout
-        });
-
-        // Step 2 & 3: NPM Install and Restart in background
-        // We use a delay to allow the response to reach the client
-        setTimeout(() => {
-            console.log('[Update] Starting npm install and restart sequence...');
-
-            exec('npm install --omit=dev', (npmerr) => {
-                if (npmerr) {
-                    console.error('[Update] NPM install failed:', npmerr);
-                    sendTelegramMessage(`❌ <b>Update aplikasi gagal</b>\nLangkah: npm install --omit=dev\nError: ${npmerr.message}`);
-                } else {
-                    console.log('[Update] NPM install success');
-                    sendTelegramMessage('✅ <b>Update aplikasi: npm install selesai</b>');
-                }
-
-                if (process.platform === 'linux') {
-                    console.log('[Update] Linux detected. Triggering systemctl restart...');
-                    exec('sudo systemctl restart mediamtx cctv-web', (restarterr) => {
-                        if (restarterr) {
-                            console.error('[Update] Restart command failed:', restarterr);
-                            sendTelegramMessage(`⚠️ <b>Update aplikasi: restart gagal</b>\nPeriksa service mediamtx dan cctv-web.\nError: ${restarterr.message}`);
-                        } else {
-                            sendTelegramMessage('🚀 <b>Update aplikasi selesai</b>\nService mediamtx dan cctv-web sudah direstart.');
-                        }
-                    });
-                }
-            });
-        }, 3000);
+    // Berikan respons ke antarmuka web
+    return res.json({
+        success: true, 
+        message: 'Aplikasi berjalan di mode Docker. Silakan gunakan Portainer untuk menarik (pull) image terbaru.',
+        output: 'Fitur pembaruan dari dalam aplikasi dinonaktifkan untuk menjaga stabilitas container.'
     });
 });
 
 app.listen(PORT, () => {
-
     console.log(`Server is running on http://localhost:${PORT}`);
 
     // Initialize push notifications
